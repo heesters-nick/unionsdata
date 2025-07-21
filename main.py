@@ -72,9 +72,9 @@ band_dictionary = {
         "zp": 30.0,
     },
     "ps-i": {
-        "name": "PSS.DR4.5",
+        "name": "PSS.DR4",
         "band": "i",
-        "vos": "vos:cfis/panstarrs/DR4.5/resamp/",
+        "vos": "vos:cfis/panstarrs/DR4/resamp/",
         "suffix": ".i.fits",
         "delimiter": ".",
         "fits_ext": 0,
@@ -111,11 +111,11 @@ NUM_CORES = 1  # Number of physical cores
 PREFETCH_FACTOR = 3  # Number of prefetched tiles per core
 
 # define the bands to consider
-considered_bands = ["whigs-g", "cfis_lsb-r", "ps-i"]
+considered_bands = ["cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"]
 # create a dictionary with the bands to consider
 band_dict_incl = {key: band_dictionary.get(key) for key in considered_bands}
 
-update_tiles = True  # whether to update the available tiles
+update_tiles = False  # whether to update the available tiles
 # build kd tree with updated tiles otherwise use the already saved tree
 if update_tiles:
     build_new_kdtree = True
@@ -125,19 +125,15 @@ else:
 at_least_key = False
 # show stats on currently available tiles, remember to update
 show_tile_statistics = True
-band_constraint = 1  # minimum number of bands that should be available for a tile to be considered
+band_constraint = (
+    1  # minimum number of bands that should be available for a tile to be considered
+)
 
 ### paths ###
 platform = "CANFAR"  #'CANFAR'
 if platform == "CANFAR":
     root_dir_main = "/arc/home/heestersnick/UNIONS-DL"
     root_dir_data = "/arc/home/heestersnick/UNIONS-DL"
-    unions_detection_directory = os.path.join(
-        root_dir_data, "catalogues/unions/GAaP_photometry/UNIONS2000"
-    )
-    redshift_class_catalog = os.path.join(
-        root_dir_data, "catalogues/redshifts/redshifts-2024-05-07.parquet"
-    )
     download_directory = os.path.join(root_dir_data, "data")
     os.makedirs(download_directory, exist_ok=True)
 elif platform == "LOCAL":
@@ -223,7 +219,9 @@ def input_to_tile_list(
     elif tiles is not None:
         return import_tiles(tiles, availability, band_constr), None, None
     else:
-        logging.info("No coordinates or DataFrame provided. Processing all available tiles..")
+        logging.info(
+            "No coordinates or DataFrame provided. Processing all available tiles.."
+        )
         ra_key, dec_key, id_key = ra_key_default, dec_key_default, id_key_default
         return None, None, None
 
@@ -254,42 +252,48 @@ def main(
     dec_key_default="dec",
     id_key_default="ID",
 ):
+    manager = Manager()
+    shutdown_flag = manager.Event()
+    download_queue = manager.Queue()
+    queue_lock = manager.Lock()
+    downloaded_bands = manager.dict()
+
+    # query availability of the tiles
+    availability, all_tiles = query_availability(
+        update, band_dict, at_least, show_tile_stats, build_kdtree, tile_info_dir
+    )
+
+    unique_tiles, tiles_x_bands, _ = input_to_tile_list(
+        availability,
+        band_constr,
+        coordinates,
+        dataframe_path,
+        tiles,
+        ra_key,
+        dec_key,
+        id_key,
+        tile_info_dir,
+        ra_key_default,
+        dec_key_default,
+        id_key_default,
+    )
+
+    print(f"len(all_tiles): {len(all_tiles)}")
+    print(f"first 5 elements of all tiles: {all_tiles[:5]}")
+    print(f"len(unique_tiles): {len(unique_tiles)}")
+    print(f"len(tiles_x_bands): {len(tiles_x_bands)}")
+    print(f"first 5 elements: {tiles_x_bands[:5]}")
+
+    if tiles_x_bands is not None:
+        selected_all_tiles = [
+            [tile for tile in band_tiles if tile in tiles_x_bands]
+            for band_tiles in all_tiles
+        ]
+        availability = TileAvailability(selected_all_tiles, band_dict, at_least)
+
+    # dictionary to keep track of processed tiles per band in current run
+    processed_in_current_run = manager.dict({band: 0 for band in band_dict.keys()})
     try:
-        manager = Manager()
-        shutdown_flag = manager.Event()
-        download_queue = manager.Queue()
-        queue_lock = manager.Lock()
-        downloaded_bands = manager.dict()
-
-        # query availability of the tiles
-        availability, all_tiles = query_availability(
-            update, band_dict, at_least, show_tile_stats, build_kdtree, tile_info_dir
-        )
-
-        _, tiles_x_bands, _ = input_to_tile_list(
-            availability,
-            band_constr,
-            coordinates,
-            dataframe_path,
-            tiles,
-            ra_key,
-            dec_key,
-            id_key,
-            tile_info_dir,
-            ra_key_default,
-            dec_key_default,
-            id_key_default,
-        )
-
-        if tiles_x_bands is not None:
-            selected_all_tiles = [
-                [tile for tile in band_tiles if tile in tiles_x_bands] for band_tiles in all_tiles
-            ]
-            availability = TileAvailability(selected_all_tiles, band_dict, at_least)
-
-        # dictionary to keep track of processed tiles per band in current run
-        processed_in_current_run = manager.dict({band: 0 for band in band_dict.keys()})
-
         # Get tiles available in the specified band(s)
         tiles_to_process = availability.get_tiles_for_bands(bands)
         unprocessed_jobs = []
@@ -359,8 +363,12 @@ if __name__ == "__main__":
         metavar=("ra", "dec"),
         help="list of pairs of coordinates to make cutouts from",
     )
-    parser.add_argument("--dataframe", type=str, help="path to a CSV file containing the DataFrame")
-    parser.add_argument("--ra_key", type=str, help="right ascension key in the DataFrame")
+    parser.add_argument(
+        "--dataframe", type=str, help="path to a CSV file containing the DataFrame"
+    )
+    parser.add_argument(
+        "--ra_key", type=str, help="right ascension key in the DataFrame"
+    )
     parser.add_argument("--dec_key", type=str, help="declination key in the DataFrame")
     parser.add_argument("--id_key", type=str, help="id key in the DataFrame")
     parser.add_argument(

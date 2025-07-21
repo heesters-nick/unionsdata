@@ -9,7 +9,7 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs.utils import skycoord_to_pixel
 from vos import Client
 
-from kd_tree import TileWCS, build_tree, query_tree
+from kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 from logging_setup import get_logger
 
 client = Client()
@@ -64,7 +64,9 @@ def tile_finder(avail, catalog, coord_c, tile_info_dir, band_constr=5):
     catalog["n_bands"] = n_bands
     unique_tiles = list(set(tiles_matching_catalog))
     tiles_x_bands = [
-        tile for tile in unique_tiles if len(avail.get_availability(tile)[1]) >= band_constr
+        tile
+        for tile in unique_tiles
+        if len(avail.get_availability(tile)[1]) >= band_constr
     ]
 
     return unique_tiles, tiles_x_bands, catalog
@@ -104,29 +106,6 @@ def extract_tile_numbers(tile_dict, in_dict):
         num_lists.append(np.array([get_tile_numbers(name) for name in tile_dict[band]]))
 
     return num_lists
-
-
-def relate_coord_tile(coords=None, nums=None):
-    """
-    Conversion between tile numbers and coordinates.
-
-    Args:
-        right ascention, declination (tuple): ra and dec coordinates
-        nums (tuple): first and second tile numbers
-
-    Returns:
-        tuple: depending on the input, return the tile numbers or the ra and dec coordinates
-    """
-    if coords:
-        ra, dec = coords
-        xxx = ra * 2 * np.cos(np.radians(dec))
-        yyy = (dec + 90) * 2
-        return int(xxx), int(yyy)
-    else:
-        xxx, yyy = nums  # type: ignore
-        dec = yyy / 2 - 90
-        ra = xxx / 2 / np.cos(np.radians(dec))
-        return np.round(ra, 12), np.round(dec, 12)
 
 
 def load_available_tiles(path, in_dict):
@@ -171,15 +150,17 @@ def update_available_tiles(path, in_dict, save=True):
             logger.info(f"Retrieving {band_filter}-band tiles...")
             # avoid adding other recently added files that are in different format
             if band == "whigs-g":
-                band_tiles = Client().glob1(vos_dir, f"calexp*{suffix}.fits")
+                band_tiles = Client().glob1(vos_dir, f"calexp*{suffix}")
             else:
-                band_tiles = Client().glob1(vos_dir, f"*{suffix}.fits")
+                band_tiles = Client().glob1(vos_dir, f"*{suffix}")
             end_fetch = time.time()
             logger.info(
                 f"Retrieving {band_filter}-band tiles completed. Took {np.round((end_fetch - start_fetch) / 60, 3)} minutes."
             )
             if save:
-                np.savetxt(os.path.join(path, f"{band}_tiles.txt"), band_tiles, fmt="%s")
+                np.savetxt(
+                    os.path.join(path, f"{band}_tiles.txt"), band_tiles, fmt="%s"
+                )
         except Exception as e:
             logger.error(f"Error fetching {band_filter}-band tiles: {e}")
 
@@ -187,7 +168,9 @@ def update_available_tiles(path, in_dict, save=True):
 class TileAvailability:
     def __init__(self, tile_nums, in_dict, at_least=False, band=None):
         self.all_tiles = tile_nums
-        self.tile_num_sets = [set(map(tuple, tile_array)) for tile_array in self.all_tiles]
+        self.tile_num_sets = [
+            set(map(tuple, tile_array)) for tile_array in self.all_tiles
+        ]
         self.unique_tiles = sorted(set.union(*self.tile_num_sets))
         self.availability_matrix = self._create_availability_matrix()
         self.counts = self._calculate_counts(at_least)
@@ -226,7 +209,9 @@ class TileAvailability:
         except TypeError:
             return [], []
         bands_available = np.where(self.availability_matrix[index] == 1)[0]
-        return [list(self.band_dict.keys())[i] for i in bands_available], bands_available
+        return [
+            list(self.band_dict.keys())[i] for i in bands_available
+        ], bands_available
 
     def band_tiles(self, band=None):
         tile_array = np.array(self.unique_tiles)[
@@ -259,7 +244,9 @@ class TileAvailability:
             return []
 
         # Get tiles available in all specified bands
-        available_tiles = np.where(self.availability_matrix[:, band_indices].all(axis=1))[0]
+        available_tiles = np.where(
+            self.availability_matrix[:, band_indices].all(axis=1)
+        )[0]
 
         return [self.unique_tiles[i] for i in available_tiles]
 
@@ -278,7 +265,9 @@ class TileAvailability:
         logger.info(f"Number of unique tiles available: {len(self.unique_tiles)}")
 
         if band:
-            logger.info(f"Number of tiles available in combinations containing the {band}-band:\n")
+            logger.info(
+                f"Number of tiles available in combinations containing the {band}-band:\n"
+            )
 
             all_bands = list(self.band_dict.keys())
             all_combinations = []
@@ -287,11 +276,16 @@ class TileAvailability:
             combinations_w_r = [x for x in all_combinations if band in x]
 
             for band_combination in combinations_w_r:
-                band_combination_str = "".join([str(x).split("-")[-1] for x in band_combination])
+                band_combination_str = "".join(
+                    [str(x).split("-")[-1] for x in band_combination]
+                )
                 band_indices = [
-                    list(self.band_dict.keys()).index(band_c) for band_c in band_combination
+                    list(self.band_dict.keys()).index(band_c)
+                    for band_c in band_combination
                 ]
-                common_tiles = np.sum(self.availability_matrix[:, band_indices].all(axis=1))
+                common_tiles = np.sum(
+                    self.availability_matrix[:, band_indices].all(axis=1)
+                )
                 logger.info(f"{band_combination_str}: {common_tiles}")
 
 
@@ -326,7 +320,9 @@ def import_coordinates(coordinates, ra_key_default, dec_key_default, id_key_defa
     formatted_coordinates = " ".join([f"({ra}, {dec})" for ra, dec in zip(ras, decs)])
     logger.info(f"Coordinates received from the command line: {formatted_coordinates}")
     catalog = df_coordinates
-    coord_c = SkyCoord(catalog[ra_key].values, catalog[dec_key].values, unit="deg", frame="icrs")
+    coord_c = SkyCoord(
+        catalog[ra_key].values, catalog[dec_key].values, unit="deg", frame="icrs"
+    )
     return catalog, coord_c
 
 
@@ -372,7 +368,9 @@ def import_dataframe(
         )
         return None, None
 
-    coord_c = SkyCoord(catalog[ra_key].values, catalog[dec_key].values, unit="deg", frame="icrs")
+    coord_c = SkyCoord(
+        catalog[ra_key].values, catalog[dec_key].values, unit="deg", frame="icrs"
+    )
 
     return catalog, coord_c
 
@@ -407,7 +405,9 @@ def import_tiles(tiles, availability, band_constr):
     ]
 
 
-def query_availability(update, in_dict, at_least_key, show_stats, build_kdtree, tile_info_dir):
+def query_availability(
+    update, in_dict, at_least_key, show_stats, build_kdtree, tile_info_dir
+):
     """
     Gather information on the currently available tiles.
 
@@ -426,7 +426,9 @@ def query_availability(update, in_dict, at_least_key, show_stats, build_kdtree, 
     if update:
         update_available_tiles(tile_info_dir, in_dict)
     # extract the tile numbers from the available tiles
-    all_bands = extract_tile_numbers(load_available_tiles(tile_info_dir, in_dict), in_dict)
+    all_bands = extract_tile_numbers(
+        load_available_tiles(tile_info_dir, in_dict), in_dict
+    )
     # create the tile availability object
     availability = TileAvailability(all_bands, in_dict, at_least_key)
     # build the kd tree
