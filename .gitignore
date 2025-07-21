@@ -5,3 +5,5 @@ ruff.toml
 __pycache__/
 tile_info/
 tables/
+data/
+figures/

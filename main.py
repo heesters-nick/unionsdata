@@ -2,14 +2,11 @@ import argparse
 import logging
 import multiprocessing
 import os
-import threading
 import time
 from datetime import timedelta
-from multiprocessing import Manager
 
 import numpy as np
 
-from download import download_worker
 from logging_setup import setup_logger
 
 setup_logger(
@@ -19,7 +16,7 @@ setup_logger(
 )
 logger = logging.getLogger()
 
-
+from download import download_tiles  # noqa: E402
 from utils import (  # noqa: E402
     TileAvailability,
     import_coordinates,
@@ -28,6 +25,7 @@ from utils import (  # noqa: E402
     query_availability,
     tile_finder,
 )
+
 
 # To work with the client you need to get CANFAR X509 certificates
 # Run these lines on the command line:
@@ -107,8 +105,7 @@ band_dictionary = {
 ########################################################################################
 
 ### Multiprocessing constants
-NUM_CORES = 1  # Number of physical cores
-PREFETCH_FACTOR = 3  # Number of prefetched tiles per core
+DOWNLOAD_THREADS = 5
 
 # define the bands to consider
 considered_bands = ["cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"]
@@ -252,18 +249,20 @@ def main(
     dec_key_default="dec",
     id_key_default="ID",
 ):
-    manager = Manager()
-    shutdown_flag = manager.Event()
-    download_queue = manager.Queue()
-    queue_lock = manager.Lock()
-    downloaded_bands = manager.dict()
+    """
+    Main function to download astronomical survey tiles.
+    """
+    logger.info("Starting UNIONS data download")
 
-    # query availability of the tiles
+    # Query availability of tiles
+    logger.info("Querying tile availability...")
     availability, all_tiles = query_availability(
         update, band_dict, at_least, show_tile_stats, build_kdtree, tile_info_dir
     )
 
-    unique_tiles, tiles_x_bands, _ = input_to_tile_list(
+    # Process input to get list of tiles to download
+    logger.info("Processing input to determine tiles to download...")
+    unique_tiles, tiles_x_bands, catalog = input_to_tile_list(
         availability,
         band_constr,
         coordinates,
@@ -278,12 +277,7 @@ def main(
         id_key_default,
     )
 
-    print(f"len(all_tiles): {len(all_tiles)}")
-    print(f"first 5 elements of all tiles: {all_tiles[:5]}")
-    print(f"len(unique_tiles): {len(unique_tiles)}")
-    print(f"len(tiles_x_bands): {len(tiles_x_bands)}")
-    print(f"first 5 elements: {tiles_x_bands[:5]}")
-
+    # If we have a specific subset of tiles, filter the availability
     if tiles_x_bands is not None:
         selected_all_tiles = [
             [tile for tile in band_tiles if tile in tiles_x_bands]
@@ -291,63 +285,45 @@ def main(
         ]
         availability = TileAvailability(selected_all_tiles, band_dict, at_least)
 
-    # dictionary to keep track of processed tiles per band in current run
-    processed_in_current_run = manager.dict({band: 0 for band in band_dict.keys()})
+    # Get tiles available in the specified bands and create download jobs
+    logger.info(f"Getting tiles available in bands: {bands}")
+    tiles_to_process = availability.get_tiles_for_bands(bands)
+
+    # Create list of (tile, band) pairs for downloading
+    download_jobs = []
+    for tile in tiles_to_process:
+        available_bands, _ = availability.get_availability(tile)
+        for band in available_bands:
+            if band in bands:  # Only download requested bands
+                download_jobs.append((tile, band))
+
+    logger.info(f"Total download jobs: {len(download_jobs)}")
+
+    # Group jobs by band for logging
+    jobs_by_band = {}
+    for tile, band in download_jobs:
+        jobs_by_band[band] = jobs_by_band.get(band, 0) + 1
+
+    for band, count in jobs_by_band.items():
+        logger.info(f"  {band}: {count} tiles")
+
+    if not download_jobs:
+        logger.warning("No tiles found to download!")
+        return
+
+    # Download the tiles
+    logger.info(f"Starting downloads using {DOWNLOAD_THREADS} threads...")
     try:
-        # Get tiles available in the specified band(s)
-        tiles_to_process = availability.get_tiles_for_bands(bands)
-        unprocessed_jobs = []
-        for tile in tiles_to_process:
-            available_bands, _ = availability.get_availability(tile)
-            for band in available_bands:
-                unprocessed_jobs.append((tile, band))
-
-        unprocessed_jobs_at_start = {band: 0 for band in band_dict.keys()}
-
-        for job in unprocessed_jobs:
-            logger.info(f"Job: {job}")
-            unprocessed_jobs_at_start[job[1]] += 1
-            download_queue.put(job)
-
-        logger.info(f"Number of unprocessed jobs: {unprocessed_jobs_at_start}")
-
-        # Create an event to signal when all downloads are complete
-        all_downloads_complete = multiprocessing.Event()
-        # Set number of download threads
-        num_download_threads = min(PREFETCH_FACTOR * NUM_CORES, len(unprocessed_jobs))
-        logger.info(f"Using {num_download_threads} download threads.")
-
-        # Start download threads
-        download_threads = []
-        for _ in range(num_download_threads):
-            t = threading.Thread(
-                target=download_worker,
-                args=(
-                    download_queue,
-                    set(bands),
-                    band_dictionary,
-                    download_dir,
-                    shutdown_flag,
-                    queue_lock,
-                    processed_in_current_run,
-                    downloaded_bands,
-                ),
-            )
-            t.daemon = True
-            t.start()
-            download_threads.append(t)
+        total_jobs, completed_jobs, failed_jobs = download_tiles(
+            download_jobs,
+            band_dictionary,
+            download_dir,
+            set(bands),  # Pass requested bands as a set
+            DOWNLOAD_THREADS,
+        )
     except Exception as e:
-        logger.error(f"An error occurred in the main process: {str(e)}")
-    finally:
-        # Cleanup for full resolution mode
-        shutdown_flag.set()
-        all_downloads_complete.set()
-
-        # Clean up download threads
-        for _ in range(num_download_threads):
-            download_queue.put((None, None))
-        for t in download_threads:
-            t.join(timeout=10)
+        logger.error(f"Error during download: {e}")
+        raise
 
 
 if __name__ == "__main__":
@@ -378,12 +354,6 @@ if __name__ == "__main__":
         action="append",
         metavar=("tile"),
         help="list of tiles to make cutouts from",
-    )
-    parser.add_argument(
-        "--processing_cores",
-        type=int,
-        default=1,
-        help="Number of cores to use for processing (default: 1)",
     )
 
     args = parser.parse_args()

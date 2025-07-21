@@ -102,8 +102,10 @@ def extract_tile_numbers(tile_dict, in_dict):
     """
 
     num_lists = []
-    for band in np.array(list(in_dict.keys())):
-        num_lists.append(np.array([get_tile_numbers(name) for name in tile_dict[band]]))
+    for band in list(in_dict.keys()):  # Remove np.array wrapper
+        # Convert to regular Python tuples with regular ints
+        tile_numbers = [get_tile_numbers(name) for name in tile_dict[band]]
+        num_lists.append(tile_numbers)  # Remove np.array wrapper
 
     return num_lists
 
