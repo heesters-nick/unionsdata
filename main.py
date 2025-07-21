@@ -72,9 +72,9 @@ band_dictionary = {
         "zp": 30.0,
     },
     "ps-i": {
-        "name": "PS-DR3",
+        "name": "PSS.DR4.5",
         "band": "i",
-        "vos": "vos:cfis/panstarrs/DR3/tiles/",
+        "vos": "vos:cfis/panstarrs/DR4.5/resamp/",
         "suffix": ".i.fits",
         "delimiter": ".",
         "fits_ext": 0,
@@ -130,19 +130,39 @@ band_constraint = 1  # minimum number of bands that should be available for a ti
 ### paths ###
 platform = "CANFAR"  #'CANFAR'
 if platform == "CANFAR":
-    root_dir_main = "/arc/home/heestersnick/dwarforge"
-    root_dir_data = "/arc/projects/unions"
+    root_dir_main = "/arc/home/heestersnick/UNIONS-DL"
+    root_dir_data = "/arc/home/heestersnick/UNIONS-DL"
     unions_detection_directory = os.path.join(
         root_dir_data, "catalogues/unions/GAaP_photometry/UNIONS2000"
     )
     redshift_class_catalog = os.path.join(
         root_dir_data, "catalogues/redshifts/redshifts-2024-05-07.parquet"
     )
-    download_directory = os.path.join(root_dir_data, "ssl/data/raw/tiles/dwarforge")
+    download_directory = os.path.join(root_dir_data, "data")
+    os.makedirs(download_directory, exist_ok=True)
 elif platform == "LOCAL":
     root_dir_main = "/home/nick/astro/UNIONS_data_download"
     root_dir_data = "/home/nick/astro/UNIONS_data_download/data"
     download_directory = "/home/nick/astro/UNIONS_data_download/downloads"
+    os.makedirs(download_directory, exist_ok=True)
+
+# paths
+# define the root directory
+main_directory = root_dir_main
+data_directory = root_dir_data
+table_directory = os.path.join(main_directory, "tables")
+os.makedirs(table_directory, exist_ok=True)
+
+ra_key_script, dec_key_script, id_key_script = "ra", "dec", "ID"
+# define where the information about the currently available tiles should be saved
+tile_info_directory = os.path.join(main_directory, "tile_info/")
+os.makedirs(tile_info_directory, exist_ok=True)
+# define where figures should be saved
+figure_directory = os.path.join(main_directory, "figures/")
+os.makedirs(figure_directory, exist_ok=True)
+# define where the logs should be saved
+log_directory = os.path.join(main_directory, "logs/")
+os.makedirs(log_directory, exist_ok=True)
 
 
 ########################################################################################
