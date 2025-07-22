@@ -26,7 +26,6 @@ from utils import (  # noqa: E402
     tile_finder,
 )
 
-
 # To work with the client you need to get CANFAR X509 certificates
 # Run these lines on the command line:
 # cadc-get-cert -u yourusername
@@ -112,7 +111,7 @@ considered_bands = ["cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"]
 # create a dictionary with the bands to consider
 band_dict_incl = {key: band_dictionary.get(key) for key in considered_bands}
 
-update_tiles = False  # whether to update the available tiles
+update_tiles = True  # whether to update the available tiles
 # build kd tree with updated tiles otherwise use the already saved tree
 if update_tiles:
     build_new_kdtree = True
@@ -127,22 +126,19 @@ band_constraint = (
 )
 
 ### paths ###
-platform = "CANFAR"  #'CANFAR'
+platform = "LOCAL"  #'CANFAR'
 if platform == "CANFAR":
     root_dir_main = "/arc/home/heestersnick/UNIONS-DL"
-    root_dir_data = "/arc/home/heestersnick/UNIONS-DL"
-    download_directory = os.path.join(root_dir_data, "data")
+    download_directory = os.path.join(root_dir_main, "data")
     os.makedirs(download_directory, exist_ok=True)
 elif platform == "LOCAL":
     root_dir_main = "/home/nick/astro/UNIONS_data_download"
-    root_dir_data = "/home/nick/astro/UNIONS_data_download/data"
-    download_directory = "/home/nick/astro/UNIONS_data_download/downloads"
+    download_directory = "/home/nick/astro/UNIONS_data_download/data"
     os.makedirs(download_directory, exist_ok=True)
 
 # paths
 # define the root directory
 main_directory = root_dir_main
-data_directory = root_dir_data
 table_directory = os.path.join(main_directory, "tables")
 os.makedirs(table_directory, exist_ok=True)
 
@@ -262,7 +258,7 @@ def main(
 
     # Process input to get list of tiles to download
     logger.info("Processing input to determine tiles to download...")
-    unique_tiles, tiles_x_bands, catalog = input_to_tile_list(
+    _, tiles_x_bands, _ = input_to_tile_list(
         availability,
         band_constr,
         coordinates,
@@ -328,7 +324,6 @@ def main(
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
-    print("Starting script...")
     # parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -367,7 +362,7 @@ if __name__ == "__main__":
         "show_tile_stats": show_tile_statistics,
         "at_least": at_least_key,
         "build_kdtree": build_new_kdtree,
-        "tile_info_dir": os.path.join(root_dir_data, "tile_info"),
+        "tile_info_dir": tile_info_directory,
         "download_dir": download_directory,
         "band_constr": band_constraint,
         "coordinates": args.coordinates,

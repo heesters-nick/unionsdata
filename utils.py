@@ -145,20 +145,32 @@ def update_available_tiles(path, in_dict, save=True):
     for band in np.array(list(in_dict.keys())):
         vos_dir = in_dict[band]["vos"]
         band_filter = in_dict[band]["band"]
+        prefix = in_dict[band]["name"]
+        delimiter = in_dict[band]["delimiter"]
         suffix = in_dict[band]["suffix"]
+        zfill = in_dict[band]["zfill"]
 
         start_fetch = time.time()
         try:
             logger.info(f"Retrieving {band_filter}-band tiles...")
-            # avoid adding other recently added files that are in different format
-            if band == "whigs-g":
-                band_tiles = Client().glob1(vos_dir, f"calexp*{suffix}")
+            # filter files based on their names
+            if zfill == 0:
+                band_tiles = Client().glob1(
+                    vos_dir, f"{prefix}{delimiter}[0-9]*{delimiter}[0-9]*{suffix}"
+                )
             else:
-                band_tiles = Client().glob1(vos_dir, f"*{suffix}")
+                digit_pattern = "[0-9]" * zfill
+                band_tiles = Client().glob1(
+                    vos_dir,
+                    f"{prefix}{delimiter}{digit_pattern}{delimiter}{digit_pattern}{suffix}",
+                )
+            # filter out problematic files
+            band_tiles = [tile for tile in band_tiles if "!" not in tile]
             end_fetch = time.time()
             logger.info(
                 f"Retrieving {band_filter}-band tiles completed. Took {np.round((end_fetch - start_fetch) / 60, 3)} minutes."
             )
+            logger.info(f"Number of {band_filter}-band tiles: {len(band_tiles)}")
             if save:
                 np.savetxt(
                     os.path.join(path, f"{band}_tiles.txt"), band_tiles, fmt="%s"

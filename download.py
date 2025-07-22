@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import queue
 import subprocess
@@ -236,7 +237,6 @@ def download_tiles(
     Returns:
         tuple: (total_jobs, completed_jobs, failed_jobs)
     """
-    import multiprocessing
 
     # Create queue and threading objects
     download_queue = queue.Queue()
