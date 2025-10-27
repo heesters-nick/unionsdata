@@ -6,7 +6,6 @@ import time
 from datetime import timedelta
 
 import numpy as np
-
 from logging_setup import setup_logger
 
 setup_logger(
@@ -135,6 +134,8 @@ elif platform == "LOCAL":
     root_dir_main = "/home/nick/astro/UNIONS_data_download"
     download_directory = "/home/nick/astro/UNIONS_data_download/data"
     os.makedirs(download_directory, exist_ok=True)
+else:
+    raise ValueError("Platform not recognized. Choose either 'CANFAR' or 'LOCAL'.")
 
 # paths
 # define the root directory

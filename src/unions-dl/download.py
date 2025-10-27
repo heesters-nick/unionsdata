@@ -6,7 +6,6 @@ import threading
 import time
 
 import numpy as np
-
 from logging_setup import get_logger
 from utils import tile_str
 

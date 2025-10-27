@@ -4,9 +4,8 @@ import joblib
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
-from scipy.spatial import cKDTree  # type: ignore
-
 from logging_setup import get_logger
+from scipy.spatial import cKDTree  # type: ignore
 
 logger = get_logger()
 

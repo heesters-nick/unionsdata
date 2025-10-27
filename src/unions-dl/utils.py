@@ -7,10 +7,9 @@ import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.wcs.utils import skycoord_to_pixel
-from vos import Client
-
 from kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 from logging_setup import get_logger
+from vos import Client
 
 client = Client()
 logger = get_logger()

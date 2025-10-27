@@ -24,10 +24,14 @@ def setup_logger(log_dir, name, logging_level=logging.INFO):
         logging_level (int): logging level (e.g. logging.INFO, logging.DEBUG)
     """
     os.makedirs(log_dir, exist_ok=True)
-    log_filename = os.path.join(log_dir, f"{os.path.splitext(os.path.basename(name))[0]}.log")
+    log_filename = os.path.join(
+        log_dir, f"{os.path.splitext(os.path.basename(name))[0]}.log"
+    )
 
     # Create formatters
-    file_formatter = logging.Formatter("%(asctime)s - ID %(process)d - %(levelname)s - %(message)s")
+    file_formatter = logging.Formatter(
+        "%(asctime)s - ID %(process)d - %(levelname)s - %(message)s"
+    )
     console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
     # Filter redundant logging messages to decrease clutter

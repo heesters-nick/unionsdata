@@ -1,0 +1,107 @@
+# ---- Build system requirements ----
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---- Project metadata & dependencies ----
+[project]
+name = "unions-dl"
+version = "0.1.0"
+description = "Download imaging data from the UNIONS survey."
+readme = "README.md"
+requires-python = ">=3.13.1"
+license = { text = "MIT" }
+authors = [{ name = "Nick Heesters" }]
+
+# ---- Runtime dependencies ----
+dependencies = [
+    "joblib>=1.5.1",
+    "numpy>=2.3.1",
+    "pandas>=2.3.1",
+    "astropy>=7.1.0",
+    "scipy>=1.16.0",
+    "vos>=3.6.3",
+    "concurrent-log-handler>=0.9.28",
+]
+
+# ---- Optional dependency groups for dev tooling, tests, docs, etc. ----
+[project.optional-dependencies]
+dev = [
+    # Testing tools
+    "pytest>=8.0",
+    "pytest-mock",
+    "pytest-cov>=4.0",
+    'pre-commit>=4.0',
+    # Code quality tools
+    "ruff>=0.5.7",
+    "mypy>=1.18.2",
+    # Type stubs for better type checking
+    "pandas-stubs",
+    "types-PyYAML",
+    "types-tqdm",
+    "scipy-stubs",
+    "types-psutil",
+]
+
+# ---- Test configuration ----
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = [
+    "-v",                        # Verbose output (show each test name)
+    "--cov=unions-dl",           # Measure code coverage for unions-dl package
+    "--cov-report=term-missing", # Show which lines aren't covered
+]
+
+[tool.mypy]
+python_version = "3.13"
+strict = false
+warn_unused_ignores = false
+warn_redundant_casts = true
+disallow_any_generics = false
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = [
+    "h5py.*",
+    "astropy.*",
+    "astroquery.*",
+    "photutils.*",
+    "sep",
+    "pywt",
+    "zoobot.*",
+    "pyarrow.*",
+    "joblib",
+    "astride",
+    "vos",
+    "sklearn.*",
+    "PIL",
+]
+ignore_missing_imports = true
+
+# ---- Ruff configuration ----
+[tool.ruff]
+line-length = 100              # Max line length (matches your existing config)
+target-version = "py313"       # Target Python 3.13 syntax
+extend-include = ["*.ipynb"]   # Also lint/format Jupyter notebooks (your setting)
+
+# Linting rules
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors (PEP 8 violations)
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (detect unused imports, undefined names, etc.)
+    "I",   # isort (sort imports)
+    "B",   # flake8-bugbear (find likely bugs)
+    "C4",  # flake8-comprehensions (better list/dict comprehensions)
+    "UP",  # pyupgrade (modernize Python syntax)
+]
+# Line too long - let the formatter handle this
+ignore = ["E501"]
+
+# Formatter settings
+[tool.ruff.format]
+quote-style = "single"         # Use 'single' quotes (your preference)
+indent-style = "space"         # Use spaces, not tabs (your setting)
+docstring-code-format = true   # Format code in docstrings (your setting)
+line-ending = "auto"           # Auto-detect line endings (LF on Linux/Mac, CRLF on Windows)
