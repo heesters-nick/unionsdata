@@ -1,8 +1,0 @@
-joblib
-numpy
-pandas
-astropy
-scipy
-vos
-concurrent_log_handler
-ruff
