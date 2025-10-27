@@ -3,10 +3,10 @@ machine: local   # canfar | narval | local
 
 logging:
   name: download_test
-  level: INFO
+  level: DEBUG
 
 runtime:
-  n_download_threads: 8
+  n_download_threads: 6
   bands: ["whigs-g", "cfis_lsb-r", "ps-i"]  # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
 
@@ -22,8 +22,6 @@ inputs:
   tiles:
     - [217, 292]
     - [234, 295]
-    - [300, 267]
-    - [274, 281]
 
   # Pairs: [[ra1, dec1], [ra2, dec2], ...]
   coordinates:
@@ -39,7 +37,6 @@ inputs:
 
 paths_common:
   # These are joined under root_dir_main
-  table_dirname:     "tables"
   tile_info_dirname: "tile_info"
   logs_dirname:      "logs"
 
@@ -47,17 +44,14 @@ paths_by_machine:
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"
     root_dir_data: "/arc/projects/unions"
-    download_directory: "/arc/projects/unions/tiles"
 
   narval:
     root_dir_main: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer"
     root_dir_data: "/home/heesters/projects/def-sfabbro/heesters/data/unions"
-    download_directory: "/home/heesters/projects/def-sfabbro/heesters/data/unions/tiles"
 
   local:
     root_dir_main: "/home/nick/astro/unionsdata"
     root_dir_data: "/home/nick/astro/unionsdata/data"
-    download_directory: "/home/nick/astro/unionsdata/data"
 
 bands:
   cfis-u:

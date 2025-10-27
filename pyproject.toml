@@ -45,6 +45,10 @@ dev = [
     "types-psutil",
 ]
 
+# ---- Console script entry points ----
+[project.scripts]
+udownload = "unionsdata.main:main"
+
 # ---- Test configuration ----
 [tool.pytest.ini_options]
 pythonpath = ["src"]

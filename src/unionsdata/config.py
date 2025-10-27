@@ -70,7 +70,6 @@ class PathsCommon(BaseModel):
     """Common path directory names."""
 
     model_config = ConfigDict(extra='forbid')
-    table_dirname: str = 'tables'
     tile_info_dirname: str = 'tile_info'
     logs_dirname: str = 'logs'
 
@@ -81,7 +80,6 @@ class PathsByMachineEntry(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
-    download_directory: Path
 
 
 class BandCfg(BaseModel):
@@ -118,8 +116,6 @@ class PathsResolved(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
-    download_directory: Path
-    table_directory: Path
     tile_info_directory: Path
     log_directory: Path
 
@@ -224,8 +220,6 @@ def load_settings(
     paths = PathsResolved(
         root_dir_main=root,
         root_dir_data=pm.root_dir_data,
-        download_directory=pm.download_directory,
-        table_directory=root / pc.table_dirname,
         tile_info_directory=root / pc.tile_info_dirname,
         log_directory=root / pc.logs_dirname,
     )
@@ -305,7 +299,6 @@ def ensure_runtime_dirs(cfg: Settings) -> None:
         cfg: Settings object with resolved paths
     """
     directories = [
-        cfg.paths.table_directory,
         cfg.paths.tile_info_directory,
         cfg.paths.log_directory,
     ]
@@ -362,7 +355,7 @@ def get_bands_subset(cfg: Settings, band_list: list[str]) -> dict[str, BandCfg]:
 
 
 def purge_previous_run(cfg) -> None:
-    """If resume == False, delete existing log files and the progress database."""
+    """If resume == False, delete existing log files."""
     if cfg.runtime.resume:
         return
 

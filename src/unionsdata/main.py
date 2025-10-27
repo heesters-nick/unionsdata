@@ -1,6 +1,5 @@
 import argparse
 import logging
-import multiprocessing
 import time
 from datetime import timedelta
 
@@ -14,6 +13,7 @@ from unionsdata.config import (
     settings_to_dict,
 )
 from unionsdata.download import download_tiles
+from unionsdata.logging_setup import setup_logger
 from unionsdata.utils import (
     TileAvailability,
     input_to_tile_list,
@@ -91,14 +91,59 @@ Examples:
     return parser.parse_args()
 
 
+def build_cli_overrides(args: argparse.Namespace) -> dict:
+    """Build dictionary of CLI overrides - only bands and input."""
+    overrides = {}
+
+    # Bands override
+    if args.bands:
+        overrides['bands'] = args.bands
+
+    if args.update_tiles:
+        overrides['tiles.update_tiles'] = True
+
+    # Input overrides (mutually exclusive)
+    if args.tiles:
+        if len(args.tiles) % 2 != 0:
+            raise ValueError('Tiles must be provided as pairs')
+        overrides['tiles'] = [
+            [args.tiles[i], args.tiles[i + 1]] for i in range(0, len(args.tiles), 2)
+        ]
+    elif args.coordinates:
+        if len(args.coordinates) % 2 != 0:
+            raise ValueError('Coordinates must be provided as pairs')
+        overrides['coordinates'] = [
+            [args.coordinates[i], args.coordinates[i + 1]]
+            for i in range(0, len(args.coordinates), 2)
+        ]
+    elif args.dataframe:
+        overrides['dataframe'] = args.dataframe
+    elif args.all_tiles:
+        overrides['all_tiles'] = True
+
+    return overrides
+
+
 def main():
     """
-    Main function to download UNIONS survey image tiles.
+    CLI entry point to download UNIONS survey image tiles.
     """
+    start = time.time()
+
+    # Parse arguments and load configuration
     args = parse_arguments()
-    overrides = vars(args)
+    overrides = build_cli_overrides(args)
     cfg = load_settings(cli_overrides=overrides)
+    # Get rid of any previous log files if resume = False
     purge_previous_run(cfg)
+
+    setup_logger(
+        log_dir=cfg.paths.log_directory,
+        name=cfg.logging.name,
+        logging_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
+        force=True,
+    )
+
     logger.info('Starting UNIONS data download')
 
     cfg_dict = settings_to_dict(cfg)
@@ -113,10 +158,9 @@ def main():
     ensure_runtime_dirs(cfg=cfg)
 
     # Define frequently used variables
-    download_threads = cfg.runtime.n_download_threads
     bands = cfg.runtime.bands
     tile_info_dir = cfg.paths.tile_info_directory
-    download_dir = cfg.paths.download_directory
+    download_dir = cfg.paths.root_dir_data
 
     # Query availability of tiles
     logger.info('Querying tile availability...')
@@ -171,6 +215,7 @@ def main():
         return
 
     # Download the tiles
+    download_threads = min(cfg.runtime.n_download_threads, len(download_jobs))
     logger.info(f'Starting downloads using {download_threads} threads...')
     try:
         total_jobs, completed_jobs, failed_jobs = download_tiles(
@@ -184,11 +229,6 @@ def main():
         logger.error(f'Error during download: {e}')
         raise
 
-
-if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn')
-    start = time.time()
-    main()
     end = time.time()
     elapsed = end - start
     elapsed_string = str(timedelta(seconds=elapsed))
@@ -200,3 +240,9 @@ if __name__ == '__main__':
     logger.info(
         f'Done! Execution took {hours} hours, {minutes} minutes, and {seconds:.2f} seconds.'
     )
+
+
+if __name__ == '__main__':
+    import sys
+
+    sys.exit(main())
