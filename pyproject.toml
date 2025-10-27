@@ -62,9 +62,13 @@ addopts = [
 [tool.mypy]
 python_version = "3.13"
 strict = false
-warn_unused_ignores = false
-warn_redundant_casts = true
-disallow_any_generics = false
+disallow_untyped_defs = true  # All functions must have type hints
+disallow_incomplete_defs = true  # All functions must have complete type hints
+check_untyped_defs = true    # Type check untyped functions
+
+disallow_any_generics = true  # Must use e.g., list[int], not list
+warn_unused_ignores = false  # Warn about unused '# type: ignore' comments
+warn_redundant_casts = true  # Warn about unnecessary casts
 files = ["src"]
 
 [[tool.mypy.overrides]]

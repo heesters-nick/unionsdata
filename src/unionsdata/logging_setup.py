@@ -1,16 +1,19 @@
 import logging
+from pathlib import Path
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 
-def setup_logger(log_dir, name, logging_level=logging.INFO, *, force=True):
+def setup_logger(
+    log_dir: Path, name: str, logging_level: int = logging.INFO, *, force: bool = True
+) -> None:
     """
     Set up a custom logger for a given script
 
     Args:
-        log_dir (Path): directory where logs should be saved
-        name (str): logger name
-        logging_level (int): logging level (e.g. logging.INFO, logging.DEBUG)
+        log_dir: directory where logs should be saved
+        name: logger name
+        logging_level: logging level (e.g. logging.INFO, logging.DEBUG)
     """
     log_filename = log_dir / f'{name}.log'
 
@@ -45,7 +48,9 @@ def setup_logger(log_dir, name, logging_level=logging.INFO, *, force=True):
 
 
 class LoggingFilter(logging.Filter):
-    def filter(self, record):
+    """Filter to suppress redundant VOSpace config messages."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
         return not (
             record.msg.startswith('Using config file')
             and 'default-vos-config' in record.msg

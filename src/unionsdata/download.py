@@ -8,16 +8,30 @@ import time
 from multiprocessing import Event, JoinableQueue
 from multiprocessing.synchronize import Event as EventT
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 
+from unionsdata.config import BandDict
 from unionsdata.utils import tile_str
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
 
 
-def tile_band_specs(tile: tuple[int, int], in_dict: dict, band: str, download_dir: Path) -> dict:
+class TileBandSpec(TypedDict):
+    fitsfilename: str
+    final_path: Path
+    temp_path: Path
+    vos_path: str
+    fits_ext: int
+    zp: float
+    tile_dir: Path
+
+
+def tile_band_specs(
+    tile: tuple[int, int], in_dict: dict[str, BandDict], band: str, download_dir: Path
+) -> TileBandSpec:
     """
     Get the necessary information for downloading a tile in a specific band.
 
@@ -28,7 +42,7 @@ def tile_band_specs(tile: tuple[int, int], in_dict: dict, band: str, download_di
         download_dir: download directory
 
     Returns:
-        dict: tile_fitsfilename, file_path after download complete, rebin_path after tile rebin, temp_path while download ongoing, vos_path (path to file on server), fits extension of the data, zero point
+        dict: tile_fitsfilename, file_path after download complete, temp_path while download ongoing, vos_path (path to file on server), fits extension of the data, zero point
     """
     vos_dir = in_dict[band]['vos']
     prefix = in_dict[band]['name']
@@ -127,13 +141,13 @@ def download_tile_one_band(
 
 
 def download_worker(
-    download_queue: JoinableQueue,
-    band_dictionary: dict,
+    download_queue: JoinableQueue[tuple[tuple[int, int], str]],
+    band_dictionary: dict[str, BandDict],
     download_dir: Path,
     shutdown_flag: EventT,
     requested_bands: set[str],
-    tile_progress,
-):
+    tile_progress: dict[str, set[str]],
+) -> None:
     """
     Worker thread that downloads tiles from the queue.
 
@@ -144,6 +158,9 @@ def download_worker(
         shutdown_flag: Event to signal worker shutdown
         requested_bands: Set of bands that were requested for download
         tile_progress: Shared dict to track download progress per tile
+
+    Returns:
+        None
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -230,8 +247,12 @@ def download_worker(
 
 
 def download_tiles(
-    tiles_to_download, band_dictionary, download_dir, requested_bands, num_threads=4
-):
+    tiles_to_download: list[tuple[tuple[int, int], str]],
+    band_dictionary: dict[str, BandDict],
+    download_dir: Path,
+    requested_bands: set[str],
+    num_threads: int = 4,
+) -> tuple[int, int, int]:
     """
     Download a list of tiles using multiple worker threads.
 
@@ -247,7 +268,7 @@ def download_tiles(
     """
 
     # Create queue and threading objects
-    download_queue = JoinableQueue()
+    download_queue: JoinableQueue[tuple[tuple[int, int] | None, str | None]] = JoinableQueue()
     shutdown_flag = Event()
 
     # Shared dictionary to track download progress per tile

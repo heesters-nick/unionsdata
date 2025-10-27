@@ -2,11 +2,13 @@ import argparse
 import logging
 import time
 from datetime import timedelta
+from typing import cast
 
 import numpy as np
 import yaml
 
 from unionsdata.config import (
+    BandDict,
     ensure_runtime_dirs,
     load_settings,
     purge_previous_run,
@@ -91,7 +93,7 @@ Examples:
     return parser.parse_args()
 
 
-def build_cli_overrides(args: argparse.Namespace) -> dict:
+def build_cli_overrides(args: argparse.Namespace) -> dict[str, object]:
     """Build dictionary of CLI overrides - only bands and input."""
     overrides = {}
 
@@ -100,7 +102,7 @@ def build_cli_overrides(args: argparse.Namespace) -> dict:
         overrides['bands'] = args.bands
 
     if args.update_tiles:
-        overrides['tiles.update_tiles'] = True
+        overrides['update_tiles'] = True
 
     # Input overrides (mutually exclusive)
     if args.tiles:
@@ -124,7 +126,7 @@ def build_cli_overrides(args: argparse.Namespace) -> dict:
     return overrides
 
 
-def main():
+def main() -> None:
     """
     CLI entry point to download UNIONS survey image tiles.
     """
@@ -153,7 +155,9 @@ def main():
     logger.info(f'Resolved config (YAML):\n{cfg_yaml}')
 
     # filter considered bands from the full band dictionary
-    band_dict = {k: cfg.bands[k].model_dump(mode='python') for k in cfg.runtime.bands}
+    band_dict: dict[str, BandDict] = {
+        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
+    }
     # make sure necessary directories exist
     ensure_runtime_dirs(cfg=cfg)
 
@@ -203,7 +207,7 @@ def main():
     logger.info(f'Total download jobs: {len(download_jobs)}')
 
     # Group jobs by band for logging
-    jobs_by_band = {}
+    jobs_by_band: dict[str, int] = {}
     for _, band in download_jobs:
         jobs_by_band[band] = jobs_by_band.get(band, 0) + 1
 
@@ -243,6 +247,4 @@ def main():
 
 
 if __name__ == '__main__':
-    import sys
-
-    sys.exit(main())
+    main()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -86,6 +86,19 @@ class BandCfg(BaseModel):
     """Band-specific configuration."""
 
     model_config = ConfigDict(extra='forbid')
+    name: str
+    band: str
+    vos: str
+    suffix: str
+    delimiter: str
+    fits_ext: int
+    zfill: int
+    zp: float
+
+
+class BandDict(TypedDict):
+    """Dictionary representation of band configuration (for legacy compatibility)."""
+
     name: str
     band: str
     vos: str
@@ -354,7 +367,7 @@ def get_bands_subset(cfg: Settings, band_list: list[str]) -> dict[str, BandCfg]:
     return {band: get_band_config(cfg, band) for band in band_list}
 
 
-def purge_previous_run(cfg) -> None:
+def purge_previous_run(cfg: Settings) -> None:
     """If resume == False, delete existing log files."""
     if cfg.runtime.resume:
         return

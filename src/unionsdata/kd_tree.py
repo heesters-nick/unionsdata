@@ -59,7 +59,7 @@ class TileWCS:
     Class to create a WCS object for a tile.
     """
 
-    def __init__(self, wcs_keywords=None):
+    def __init__(self, wcs_keywords: dict[str, float | int | str] | None = None):
         if wcs_keywords is None:
             wcs_keywords = {}
         wcs_keywords.update(
@@ -82,7 +82,7 @@ class TileWCS:
 
         self.wcs_tile = WCS(wcs_keywords)
 
-    def set_coords(self, coords):
+    def set_coords(self, coords: tuple[float, float]) -> None:
         self.wcs_tile.wcs.crval = [coords[0], coords[1]]
 
 

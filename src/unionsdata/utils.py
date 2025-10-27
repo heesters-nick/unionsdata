@@ -4,14 +4,16 @@ import re
 import time
 from itertools import combinations
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.wcs.utils import skycoord_to_pixel
+from numpy.typing import NDArray
 from vos import Client
 
-from unionsdata.config import InputsCfg
+from unionsdata.config import BandDict, InputsCfg
 from unionsdata.kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 
 client = Client()
@@ -19,15 +21,36 @@ logger = logging.getLogger(__name__)
 
 
 class TileAvailability:
-    def __init__(self, tile_nums, in_dict, at_least=False, band=None):
-        self.all_tiles = tile_nums
-        self.tile_num_sets = [set(map(tuple, tile_array)) for tile_array in self.all_tiles]
-        self.unique_tiles = sorted(set.union(*self.tile_num_sets))
-        self.availability_matrix = self._create_availability_matrix()
-        self.counts = self._calculate_counts(at_least)
-        self.band_dict = in_dict
+    """Track availability of tiles across different bands."""
 
-    def _create_availability_matrix(self):
+    def __init__(
+        self,
+        tile_nums: list[list[tuple[int, int]]],
+        in_dict: dict[str, BandDict],
+        at_least: bool = False,
+    ) -> None:
+        """Initialize tile availability tracker.
+
+        Args:
+            tile_nums: List of tile lists per band, where each tile is (x, y)
+            in_dict: Band configuration dictionary
+            at_least: If True, count "at least N bands" instead of "exactly N bands"
+        """
+
+        self.all_tiles: list[list[tuple[int, int]]] = tile_nums
+        self.tile_num_sets: list[set[tuple[int, int]]] = [
+            cast(set[tuple[int, int]], set(tile_array)) for tile_array in self.all_tiles
+        ]
+        self.unique_tiles: list[tuple[int, int]] = cast(
+            list[tuple[int, int]], sorted(set.union(*self.tile_num_sets))
+        )
+        self.availability_matrix: NDArray[np.int_] = self._create_availability_matrix()
+        self.counts: dict[int, int] = self._calculate_counts(at_least)
+        self.band_dict: dict[str, BandDict] = in_dict
+
+    def _create_availability_matrix(self) -> NDArray[np.int_]:
+        """Create binary matrix of tile availability per band."""
+
         array_shape = (len(self.unique_tiles), len(self.all_tiles))
         availability_matrix = np.zeros(array_shape, dtype=int)
 
@@ -37,7 +60,9 @@ class TileAvailability:
 
         return availability_matrix
 
-    def _calculate_counts(self, at_least):
+    def _calculate_counts(self, at_least: bool) -> dict[int, int]:
+        """Calculate how many tiles are available in N bands."""
+
         counts = np.sum(self.availability_matrix, axis=1)
         bands_available, tile_counts = np.unique(counts, return_counts=True)
 
@@ -51,30 +76,48 @@ class TileAvailability:
 
         return counts_dict
 
-    def get_availability(self, tile_nums):
+    def get_availability(self, tile_nums: tuple[int, int]) -> tuple[list[str], NDArray[np.intp]]:
+        """Get bands available for a given tile.
+        Args:
+            tile_nums: Tile numbers (x, y)
+
+        Returns:
+            Tuple of (list of band names, numpy array of band indices)
+        """
+
         try:
-            index = self.unique_tiles.index(tuple(tile_nums))
+            index = self.unique_tiles.index(tile_nums)
         except ValueError:
             logger.warning(f'Tile number {tile_nums} not available in any band.')
-            return [], []
+            return [], np.array([], dtype=np.intp)
         except TypeError:
-            return [], []
+            return [], np.array([], dtype=np.intp)
         bands_available = np.where(self.availability_matrix[index] == 1)[0]
         return [list(self.band_dict.keys())[i] for i in bands_available], bands_available
 
-    def band_tiles(self, band=None):
-        tile_array = np.array(self.unique_tiles)[
+    def band_tiles(self, band: str) -> list[tuple[int, int]]:
+        """
+        Get all tiles available in a specific band.
+
+        Args:
+            band: Band name
+
+        Returns:
+            List of tiles available in that band
+        """
+
+        tile_array: NDArray[np.object_] = np.array(self.unique_tiles)[
             self.availability_matrix[:, list(self.band_dict.keys()).index(band)] == 1
         ]
-        return [tuple(tile) for tile in tile_array]
+        return cast(list[tuple[int, int]], [tuple(tile) for tile in tile_array])
 
-    def get_tiles_for_bands(self, bands=None):
+    def get_tiles_for_bands(self, bands: str | list[str] | None = None) -> list[tuple[int, int]]:
         """
         Get all tiles that are available in specified bands.
         If no bands are specified, return all unique tiles.
 
         Args:
-            bands (str or list): Band name(s) to check for availability.
+            bands: Band name(s) to check for availability.
                                  Can be a single band name or a list of band names.
 
         Returns:
@@ -93,11 +136,13 @@ class TileAvailability:
             return []
 
         # Get tiles available in all specified bands
-        available_tiles = np.where(self.availability_matrix[:, band_indices].all(axis=1))[0]
+        available_tiles: NDArray[np.intp] = np.where(
+            self.availability_matrix[:, band_indices].all(axis=1)
+        )[0]
 
         return [self.unique_tiles[i] for i in available_tiles]
 
-    def stats(self, band=None):
+    def stats(self, band: str | None = None) -> None:
         logger.info('Number of currently available tiles per band:')
         max_band_name_length = max(map(len, self.band_dict.keys()))  # for output format
         for band_name, count in zip(
@@ -115,7 +160,7 @@ class TileAvailability:
             logger.info(f'Number of tiles available in combinations containing the {band}-band:\n')
 
             all_bands = list(self.band_dict.keys())
-            all_combinations = []
+            all_combinations: list[tuple[str, ...]] = []
             for r in range(1, len(all_bands) + 1):
                 all_combinations.extend(combinations(all_bands, r))
             combinations_w_r = [x for x in all_combinations if band in x]
@@ -214,7 +259,9 @@ def get_tile_numbers(name: str) -> tuple[int, int]:
     return num1, num2
 
 
-def extract_tile_numbers(tile_dict: dict, in_dict: dict) -> list[list[tuple[int, int]]]:
+def extract_tile_numbers(
+    tile_dict: dict[str, NDArray[np.str_]], in_dict: dict[str, BandDict]
+) -> list[list[tuple[int, int]]]:
     """
     Extract tile numbers from .fits file names.
 
@@ -227,15 +274,15 @@ def extract_tile_numbers(tile_dict: dict, in_dict: dict) -> list[list[tuple[int,
     """
 
     num_lists = []
-    for band in list(in_dict.keys()):  # Remove np.array wrapper
-        # Convert to regular Python tuples with regular ints
+    for band in list(in_dict.keys()):
+        # Convert to tuples of ints
         tile_numbers = [get_tile_numbers(name) for name in tile_dict[band]]
-        num_lists.append(tile_numbers)  # Remove np.array wrapper
+        num_lists.append(tile_numbers)
 
     return num_lists
 
 
-def load_available_tiles(path: Path, in_dict: dict) -> dict:
+def load_available_tiles(path: Path, in_dict: dict[str, BandDict]) -> dict[str, NDArray[np.str_]]:
     """
     Load tile lists from disk.
     Args:
@@ -247,14 +294,14 @@ def load_available_tiles(path: Path, in_dict: dict) -> dict:
     """
 
     band_tiles = {}
-    for band in np.array(list(in_dict.keys())):
-        tiles = np.loadtxt(os.path.join(path, f'{band}_tiles.txt'), dtype=str)
+    for band in in_dict.keys():
+        tiles = np.loadtxt(path / f'{band}_tiles.txt', dtype=str)
         band_tiles[band] = tiles
 
     return band_tiles
 
 
-def update_available_tiles(path: Path, in_dict: dict, save: bool = True) -> None:
+def update_available_tiles(path: Path, in_dict: dict[str, BandDict], save: bool = True) -> None:
     """
     Update available tile lists from the VOSpace. Takes a few mins to run.
 
@@ -304,7 +351,7 @@ def update_available_tiles(path: Path, in_dict: dict, save: bool = True) -> None
 
 def query_availability(
     update: bool,
-    in_dict: dict,
+    in_dict: dict[str, BandDict],
     show_stats: bool,
     tile_info_dir: Path,
 ) -> tuple[TileAvailability, list[list[tuple[int, int]]]]:
@@ -489,5 +536,5 @@ def input_to_tile_list(
     return unique_tiles, tiles_x_bands, catalog
 
 
-def tile_str(tile):
+def tile_str(tile: tuple[int, int]) -> str:
     return f'({tile[0]}, {tile[1]})'

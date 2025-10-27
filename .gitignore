@@ -7,3 +7,7 @@ tile_info/
 tables/
 data/
 figures/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
