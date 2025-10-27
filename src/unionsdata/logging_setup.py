@@ -1,38 +1,22 @@
 import logging
-import os
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 
-def get_logger():
-    """
-    Get the configured logger
-
-    Returns:
-        logging.Logger: configured logger
-    """
-    return logging.getLogger()
-
-
-def setup_logger(log_dir, name, logging_level=logging.INFO):
+def setup_logger(log_dir, name, logging_level=logging.INFO, *, force=True):
     """
     Set up a custom logger for a given script
 
     Args:
-        log_dir (str): directory where logs should be saved
+        log_dir (Path): directory where logs should be saved
         name (str): logger name
         logging_level (int): logging level (e.g. logging.INFO, logging.DEBUG)
     """
-    os.makedirs(log_dir, exist_ok=True)
-    log_filename = os.path.join(
-        log_dir, f"{os.path.splitext(os.path.basename(name))[0]}.log"
-    )
+    log_filename = log_dir / f'{name}.log'
 
     # Create formatters
-    file_formatter = logging.Formatter(
-        "%(asctime)s - ID %(process)d - %(levelname)s - %(message)s"
-    )
-    console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_formatter = logging.Formatter('%(asctime)s - ID %(process)d - %(levelname)s - %(message)s')
+    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # Filter redundant logging messages to decrease clutter
     log_filter = LoggingFilter()
@@ -42,6 +26,7 @@ def setup_logger(log_dir, name, logging_level=logging.INFO):
         log_filename,
         maxBytes=10 * 1024 * 1024,  # 10 MB per file
         backupCount=1000,  # keep all log files
+        encoding='utf-8',
     )
     file_handler.setFormatter(file_formatter)
     file_handler.addFilter(log_filter)
@@ -55,13 +40,14 @@ def setup_logger(log_dir, name, logging_level=logging.INFO):
     logging.basicConfig(
         level=logging_level,
         handlers=[file_handler, console_handler],
+        force=force,  # Overwrite any existing logging configuration
     )
 
 
 class LoggingFilter(logging.Filter):
     def filter(self, record):
         return not (
-            record.msg.startswith("Using config file")
-            and "default-vos-config" in record.msg
+            record.msg.startswith('Using config file')
+            and 'default-vos-config' in record.msg
             and record.levelno == logging.INFO
         )

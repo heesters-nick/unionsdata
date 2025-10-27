@@ -8,6 +8,7 @@ logging:
 runtime:
   n_download_threads: 8
   bands: ["whigs-g", "cfis_lsb-r", "ps-i"]  # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  resume: false
 
 tiles:
   update_tiles: false  # set to true to update tile list from the VOS vault
@@ -40,32 +41,23 @@ paths_common:
   # These are joined under root_dir_main
   table_dirname:     "tables"
   tile_info_dirname: "tile_info"
-  figure_dirname:    "figures"
   logs_dirname:      "logs"
-  database_dirname:  "databases"
-  aggregate_dirname: "combined_cutouts"
 
 paths_by_machine:
   canfar:
-    root_dir_main: "/arc/home/heestersnick/unions_download"
+    root_dir_main: "/arc/home/heestersnick/unionsdata"
     root_dir_data: "/arc/projects/unions"
-    redshift_class_catalog: "/arc/projects/unions/catalogues/redshifts/redshifts-2024-05-07.parquet"
-    download_directory: "/arc/projects/unions/ssl/data/raw/tiles/dwarforge"
-    cutout_directory: "/arc/home/heestersnick/dwarforge/cutouts"
+    download_directory: "/arc/projects/unions/tiles"
 
   narval:
     root_dir_main: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer"
     root_dir_data: "/home/heesters/projects/def-sfabbro/heesters/data/unions"
-    redshift_class_catalog: "/home/heesters/projects/def-sfabbro/heesters/data/unions/catalogs/labels/redshifts/redshifts-2024-05-07.parquet"
     download_directory: "/home/heesters/projects/def-sfabbro/heesters/data/unions/tiles"
-    cutout_directory: "/home/heesters/projects/def-sfabbro/heesters/data/unions/cutouts"
 
   local:
     root_dir_main: "/home/nick/astro/unionsdata"
     root_dir_data: "/home/nick/astro/unionsdata/data"
-    redshift_class_catalog: "/home/nick/astro/dwarf_visualization/tables/redshifts-2024-05-07.parquet"
     download_directory: "/home/nick/astro/unionsdata/data"
-    cutout_directory: "/home/nick/astro/unionsdata/cutouts"
 
 bands:
   cfis-u:
