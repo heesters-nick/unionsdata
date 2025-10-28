@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from multiprocessing import Event, JoinableQueue
+from multiprocessing.queues import JoinableQueue as JoinableQueueT
 from multiprocessing.synchronize import Event as EventT
 from pathlib import Path
 from typing import TypedDict
@@ -141,7 +142,7 @@ def download_tile_one_band(
 
 
 def download_worker(
-    download_queue: JoinableQueue[tuple[tuple[int, int], str]],
+    download_queue: JoinableQueueT[tuple[tuple[int, int], str]],
     band_dictionary: dict[str, BandDict],
     download_dir: Path,
     shutdown_flag: EventT,
@@ -175,7 +176,7 @@ def download_worker(
 
             # Check for sentinel value (shutdown signal)
             if tile is None:
-                logger.info(f'Download worker {worker_id} received shutdown signal')
+                logger.debug(f'Download worker {worker_id} received shutdown signal')
                 break
 
             try:
@@ -241,7 +242,7 @@ def download_worker(
             if shutdown_flag.is_set():
                 break
 
-    logger.info(
+    logger.debug(
         f'Download worker {worker_id} exiting. Completed: {downloads_completed}, Failed: {downloads_failed}'
     )
 
@@ -268,7 +269,7 @@ def download_tiles(
     """
 
     # Create queue and threading objects
-    download_queue: JoinableQueue[tuple[tuple[int, int] | None, str | None]] = JoinableQueue()
+    download_queue: JoinableQueueT[tuple[tuple[int, int] | None, str | None]] = JoinableQueue()
     shutdown_flag = Event()
 
     # Shared dictionary to track download progress per tile
@@ -302,14 +303,14 @@ def download_tiles(
         t.start()
         threads.append(t)
 
+    # Final summary of completed tiles
+    complete_tiles = []
+    incomplete_tiles = []
+
     try:
         # Wait for all downloads to complete
         download_queue.join()
         logger.info('All download jobs completed')
-
-        # Final summary of completed tiles
-        complete_tiles = []
-        incomplete_tiles = []
 
         for tile_key, bands in tile_progress.items():
             if requested_bands.issubset(bands):  # Fix: use issubset instead of >=
@@ -318,7 +319,6 @@ def download_tiles(
                 missing = requested_bands - bands
                 incomplete_tiles.append((tile_key, sorted(bands), sorted(missing)))
 
-        logger.info(f'Final summary: {len(complete_tiles)} tiles completed in all requested bands')
         if incomplete_tiles:
             logger.warning(f'{len(incomplete_tiles)} tiles incomplete:')
             for tile_key, downloaded, missing in incomplete_tiles:
@@ -346,6 +346,11 @@ def download_tiles(
     completed_jobs = total_jobs - remaining_jobs
     failed_jobs = remaining_jobs
 
-    logger.info(f'Download summary: {completed_jobs}/{total_jobs} completed, {failed_jobs} failed')
+    logger.info(
+        f'Download summary:\n'
+        f'  {len(complete_tiles)} tiles downloaded\n'
+        f'  {completed_jobs}/{total_jobs} jobs completed\n'
+        f'  {failed_jobs} jobs failed'
+    )
 
     return total_jobs, completed_jobs, failed_jobs
