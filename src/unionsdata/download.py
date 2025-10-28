@@ -123,8 +123,7 @@ def download_tile_one_band(
                 except subprocess.TimeoutExpired:
                     process.kill()
                 # Clean up temp file if it exists
-                if temp_path.exists():
-                    temp_path.unlink()
+                # cleanup_temp_file(temp_path)
                 return False
             time.sleep(0.1)
 
@@ -148,23 +147,20 @@ def download_tile_one_band(
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.error(f'Subprocess error details: {e}')
         # Clean up temp file on error
-        if temp_path.exists():
-            temp_path.unlink()
+        # cleanup_temp_file(temp_path)
         return False
 
     except FileNotFoundError:
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
         # Clean up temp file on error
-        if temp_path.exists():
-            temp_path.unlink()
+        # cleanup_temp_file(temp_path)
         return False
 
     except Exception as e:
         logger.error(f'Tile {tile_str(tile_numbers)} in {band}: an unexpected error occurred: {e}')
         # Clean up temp file on error
-        if temp_path.exists():
-            temp_path.unlink()
+        # cleanup_temp_file(temp_path)
         return False
 
 
@@ -175,6 +171,7 @@ def download_worker(
     shutdown_flag: Event,
     requested_bands: set[str],
     tile_progress: dict[str, set[str]],
+    tile_progress_lock: threading.Lock,
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -186,9 +183,7 @@ def download_worker(
         shutdown_flag: Event to signal worker shutdown
         requested_bands: Set of bands that were requested for download
         tile_progress: Shared dict to track download progress per tile
-
-    Returns:
-        None
+        tile_progress_lock: Lock to synchronize access to tile_progress
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -229,17 +224,16 @@ def download_worker(
                 if success:
                     downloads_completed += 1
 
-                    # Track progress for this tile (fix for Manager dict with sets)
+                    # Track progress for this tile
                     tile_str_key = f'{tile[0]:03d}_{tile[1]:03d}'
 
-                    # Update the set of downloaded bands for this tile
-                    if tile_str_key not in tile_progress:
-                        tile_progress[tile_str_key] = set()
-                    tile_progress[tile_str_key].add(band)
+                    # Thread-safe update of tile progress
+                    with tile_progress_lock:
+                        tile_progress[tile_str_key].add(band)
 
-                    # Check if tile is complete in all requested bands
-                    tile_bands = tile_progress[tile_str_key]
-                    remaining_bands = requested_bands - tile_bands
+                        # Check if tile is complete in all requested bands
+                        tile_bands = tile_progress[tile_str_key]
+                        remaining_bands = requested_bands - tile_bands
 
                     logger.info(f'Tile {tile_str_key} downloaded in band {band}')
 
@@ -302,6 +296,10 @@ def download_tiles(
 
     # Shared dictionary to track download progress per tile
     tile_progress: dict[str, set[str]] = {}
+    for tile, _ in tiles_to_download:
+        tile_key = f'{tile[0]:03d}_{tile[1]:03d}'
+        tile_progress[tile_key] = set()
+    tile_progress_lock = threading.Lock()
 
     # Signal handler for graceful shutdown
     def signal_handler(signum: int, frame: FrameType | None) -> None:
@@ -332,6 +330,7 @@ def download_tiles(
                 shutdown_flag,
                 requested_bands,
                 tile_progress,
+                tile_progress_lock,
             ),
             name=f'DownloadWorker-{i}',
         )
@@ -410,10 +409,52 @@ def download_tiles(
     return total_jobs, completed_jobs, failed_jobs
 
 
+def cleanup_temp_file(temp_path: Path) -> None:
+    """
+    Clean up temp file OR associated .part file created by vcp.
+    Only one will exist at a time:
+    - During download: *_temp.fits-<hash>.part
+    - After vcp completes: *_temp.fits
+
+    Args:
+        temp_path: Path to the temp file (e.g., *_temp.fits)
+    """
+    files_removed = 0
+
+    # Clean up the main temp file (exists after vcp completes but before rename)
+    if temp_path.exists():
+        try:
+            temp_path.unlink()
+            logger.debug(f'Removed temp file: {temp_path}')
+            files_removed += 1
+        except Exception as e:
+            logger.warning(f'Could not remove temp file {temp_path}: {e}')
+
+    # Clean up any .part files (exist during active download)
+    # Pattern: *_temp.fits-<hash>.part
+    parent = temp_path.parent
+    pattern = f'{temp_path.name}*.part'
+    for part_file in parent.glob(pattern):
+        try:
+            part_file.unlink()
+            logger.debug(f'Removed part file: {part_file}')
+            files_removed += 1
+        except Exception as e:
+            logger.warning(f'Could not remove part file {part_file}: {e}')
+
+    if files_removed > 0:
+        logger.debug(f'Cleaned up {files_removed} file(s) for {temp_path.name}')
+
+
 def cleanup_temp_files(download_dir: Path) -> None:
     """Clean up any temporary files left behind from interrupted downloads."""
     try:
-        temp_files = list(download_dir.rglob('*_temp.fits'))
+        # Look for both _temp.fits files and .part files created by vcp
+        temp_fits_files = list(download_dir.rglob('*_temp.fits'))
+        part_files = list(download_dir.rglob('*_temp.fits*.part'))
+
+        temp_files = temp_fits_files + part_files
+
         if temp_files:
             logger.info(f'Cleaning up {len(temp_files)} temporary files...')
             for temp_file in temp_files:
