@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -180,39 +182,28 @@ class Settings(BaseModel):
 
 
 def load_settings(
-    config_path: Path = Path('configs/download_config.yaml'),
+    config_path: Path | None = None,
     cli_overrides: dict[str, Any] | None = None,
 ) -> Settings:
     """
     Load and validate configuration from YAML file.
 
+    Searches for config in multiple standard locations if path not provided.
+    See find_config_file() for search order.
+
     Args:
-        config_path: Path to YAML configuration file
-        cli_overrides: Dictionary of CLI overrides to apply
+        config_path: Path to YAML configuration file (optional)
+        cli_overrides: Dictionary of CLI overrides to apply (optional)
 
     Returns:
         Validated Settings object
 
     Raises:
         ValueError: If configuration is invalid
-        FileNotFoundError: If config file doesn't exist
+        FileNotFoundError: If config file doesn't exist in any search location
     """
-    if not config_path.exists():
-        # Try searching in common locations
-        search_paths = [
-            Path('configs/download_config.yaml'),
-            Path('download_config.yaml'),
-            Path('../configs/download_config.yaml'),
-        ]
-        for search_path in search_paths:
-            if search_path.exists():
-                config_path = search_path
-                break
-        else:
-            raise FileNotFoundError(
-                f'Config file not found: {config_path}. Searched: {search_paths}'
-            )
-
+    # Find config file (searches multiple locations)
+    config_path = find_config_file(config_path)
     logger.info(f'Loading configuration from: {config_path}')
 
     with open(config_path, encoding='utf-8') as f:
@@ -249,6 +240,14 @@ def load_settings(
     )
 
     logger.info(f'Configuration loaded successfully for machine: {raw.machine}')
+
+    # Check and warn if this appears to be first run
+    if is_first_run(settings.paths.tile_info_directory):
+        logger.warning(
+            'Tile information files not found. This appears to be a first run.\n'
+            'You may need to run with --update-tiles to download tile lists.'
+        )
+
     return settings
 
 
@@ -378,3 +377,111 @@ def purge_previous_run(cfg: Settings) -> None:
     for p in log_dir.glob(f'{stem}.log*'):
         p.unlink(missing_ok=True)
         logger.debug(f'Removed old log file: {p}')
+
+
+def get_user_config_dir() -> Path:
+    """
+    Get the user configuration directory following OS conventions.
+
+    Returns user config directory, but does NOT create it.
+    Creation happens only when actually needed.
+
+    Linux/Mac: ~/.config/unionsdata/
+    Windows: %APPDATA%/unionsdata/
+    """
+    if sys.platform == 'win32':
+        base = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
+    else:
+        # XDG Base Directory specification
+        base = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
+
+    return base / 'unionsdata'
+
+
+def get_user_data_dir() -> Path:
+    """
+    Get the user data directory following OS conventions.
+
+    This is where tile_info, kdtree, etc. would be stored for pip installs.
+    Returns directory path, but does NOT create it.
+
+    Linux/Mac: ~/.local/share/unionsdata/
+    Windows: %LOCALAPPDATA%/unionsdata/
+    """
+    if sys.platform == 'win32':
+        base = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local'))
+    else:
+        # XDG Base Directory specification
+        base = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share'))
+
+    return base / 'unionsdata'
+
+
+def find_config_file(explicit_path: Path | None = None) -> Path:
+    """
+    Find configuration file by searching multiple locations.
+
+    Search order:
+    1. Explicit path provided by user (if given)
+    2. ./configs/download_config.yaml (dev/editable install)
+    3. ./download_config.yaml (current directory)
+    4. ~/.config/unionsdata/config.yaml (user config - for future pip install)
+    5. ../configs/download_config.yaml (one level up)
+
+    Args:
+        explicit_path: User-provided config path (highest priority)
+
+    Returns:
+        Path to config file
+
+    Raises:
+        FileNotFoundError: If no config file found in any location
+    """
+    if explicit_path is not None:
+        if explicit_path.exists():
+            return explicit_path
+        else:
+            raise FileNotFoundError(f'Specified config file not found: {explicit_path}')
+
+    # Search standard locations
+    search_paths = [
+        Path('configs/download_config.yaml'),  # Dev install
+        Path('download_config.yaml'),  # Current directory
+        get_user_config_dir() / 'config.yaml',  # User config (pip)
+        Path('../configs/download_config.yaml'),  # One level up
+    ]
+
+    for search_path in search_paths:
+        if search_path.exists():
+            logger.debug(f'Found config file at: {search_path}')
+            return search_path
+
+    # No config found anywhere
+    raise FileNotFoundError(
+        'Config file not found. Searched locations:\n'
+        + '\n'.join(f'  - {p}' for p in search_paths)
+        + '\n\nPlease create a config file or specify path with --config'
+    )
+
+
+def is_first_run(tile_info_dir: Path) -> bool:
+    """
+    Check if this appears to be a first run (missing tile info files).
+
+    Args:
+        tile_info_dir: Directory where tile info should be stored
+
+    Returns:
+        True if tile info files are missing, False otherwise
+    """
+    if not tile_info_dir.exists():
+        return True
+
+    # Check for any band tile files
+    tile_files = list(tile_info_dir.glob('*_tiles.txt'))
+    kdtree_file = tile_info_dir / 'kdtree_xyz.joblib'
+
+    if not tile_files or not kdtree_file.exists():
+        return True
+
+    return False
