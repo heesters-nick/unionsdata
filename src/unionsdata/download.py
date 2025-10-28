@@ -301,8 +301,8 @@ def download_tiles(
         threads.append(t)
 
     # Final summary of completed tiles
-    complete_tiles = []
-    incomplete_tiles = []
+    complete_tiles: list[str] = []
+    incomplete_tiles: list[tuple[str, list[str], list[str]]] = []
 
     try:
         # Wait for all downloads to complete
@@ -318,8 +318,8 @@ def download_tiles(
 
         if incomplete_tiles:
             logger.warning(f'{len(incomplete_tiles)} tiles incomplete:')
-            for tile_key, downloaded, missing in incomplete_tiles:
-                logger.warning(f'  {tile_key}: downloaded {downloaded}, missing {missing}')
+            for tile_key, downloaded, missing_bands in incomplete_tiles:
+                logger.warning(f'  {tile_key}: downloaded {downloaded}, missing {missing_bands}')
 
     except KeyboardInterrupt:
         logger.info('Download interrupted by user')
