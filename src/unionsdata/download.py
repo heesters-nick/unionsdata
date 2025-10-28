@@ -1,12 +1,14 @@
 import logging
 import posixpath
 import queue
+import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
 from queue import Queue
 from threading import Event
+from types import FrameType
 from typing import TypedDict
 
 import numpy as np
@@ -81,6 +83,7 @@ def download_tile_one_band(
     temp_path: Path,
     vos_path: str,
     band: str,
+    shutdown_flag: Event,
 ) -> bool:
     """
     Download a tile in a specific band.
@@ -92,6 +95,7 @@ def download_tile_one_band(
         temp_path: path to file while download ongoing
         vos_path: path to file on server
         band: band name
+        shutdown_flag: Event to signal shutdown
 
     Returns:
         success/failure
@@ -103,20 +107,36 @@ def download_tile_one_band(
     try:
         logger.info(f'Downloading {tile_fitsname} for band {band}...')
         start_time = time.time()
-        result = subprocess.run(
+        process = subprocess.Popen(
             ['vcp', '-v', vos_path, str(temp_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
-            check=False,
         )
 
-        # Surface output in logs to help diagnose remote errors
-        if result.stdout:
-            logger.debug('vcp stdout:\n%s', result.stdout)
-        if result.stderr:
-            logger.debug('vcp stderr:\n%s', result.stderr)
+        while process.poll() is None:
+            if shutdown_flag.is_set():
+                logger.warning(f'Shutdown requested, terminating download of {tile_fitsname}')
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                # Clean up temp file if it exists
+                if temp_path.exists():
+                    temp_path.unlink()
+                return False
+            time.sleep(0.1)
 
-        result.check_returncode()
+        # Check if process completed successfully
+        if process.returncode != 0:
+            stdout, stderr = process.communicate()
+            if stdout:
+                logger.debug('vcp stdout:\n%s', stdout)
+            if stderr:
+                logger.debug('vcp stderr:\n%s', stderr)
+            raise subprocess.CalledProcessError(process.returncode, process.args)
+
         # change to path mode
         temp_path.rename(final_path)
         logger.info(
@@ -127,15 +147,24 @@ def download_tile_one_band(
     except subprocess.CalledProcessError as e:
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.error(f'Subprocess error details: {e}')
+        # Clean up temp file on error
+        if temp_path.exists():
+            temp_path.unlink()
         return False
 
     except FileNotFoundError:
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
+        # Clean up temp file on error
+        if temp_path.exists():
+            temp_path.unlink()
         return False
 
     except Exception as e:
         logger.error(f'Tile {tile_str(tile_numbers)} in {band}: an unexpected error occurred: {e}')
+        # Clean up temp file on error
+        if temp_path.exists():
+            temp_path.unlink()
         return False
 
 
@@ -194,6 +223,7 @@ def download_worker(
                     temp_path=paths['temp_path'],
                     vos_path=paths['vos_path'],
                     band=band,
+                    shutdown_flag=shutdown_flag,
                 )
 
                 if success:
@@ -273,6 +303,14 @@ def download_tiles(
     # Shared dictionary to track download progress per tile
     tile_progress: dict[str, set[str]] = {}
 
+    # Signal handler for graceful shutdown
+    def signal_handler(signum: int, frame: FrameType | None) -> None:
+        logger.warning(f'Received signal {signum}, initiating graceful shutdown...')
+        shutdown_flag.set()
+
+    original_sigint = signal.signal(signal.SIGINT, signal_handler)
+    original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
+
     # Add all download jobs to queue
     for tile, band in tiles_to_download:
         download_queue.put((tile, band))
@@ -306,8 +344,18 @@ def download_tiles(
 
     try:
         # Wait for all downloads to complete
-        download_queue.join()
-        logger.info('All download jobs completed')
+        while not shutdown_flag.is_set():
+            try:
+                if download_queue.unfinished_tasks == 0:
+                    break
+                time.sleep(1)
+            except KeyboardInterrupt:
+                logger.warning('Keyboard interrupt detected, shutting down...')
+                shutdown_flag.set()
+                break
+
+        if not shutdown_flag.is_set():
+            logger.info('All download jobs completed')
 
         for tile_key, bands in tile_progress.items():
             if requested_bands.issubset(bands):
@@ -325,7 +373,12 @@ def download_tiles(
         logger.info('Download interrupted by user')
 
     finally:
+        # Restore original signal handlers
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+
         # Signal workers to shutdown
+        logger.debug('Signaling workers to shut down...')
         shutdown_flag.set()
 
         # Send sentinel values to wake up workers
@@ -333,10 +386,13 @@ def download_tiles(
             download_queue.put((None, None))
 
         # Wait for all threads to finish
+        logger.info('Waiting for worker threads to finish...')
         for t in threads:
-            t.join(timeout=10)
+            t.join(timeout=30)
             if t.is_alive():
                 logger.warning(f'Thread {t.name} did not shut down cleanly')
+
+        cleanup_temp_files(download_dir)
 
     # Count remaining jobs (failures)
     remaining_jobs = download_queue.qsize()
@@ -352,3 +408,19 @@ def download_tiles(
     )
 
     return total_jobs, completed_jobs, failed_jobs
+
+
+def cleanup_temp_files(download_dir: Path) -> None:
+    """Clean up any temporary files left behind from interrupted downloads."""
+    try:
+        temp_files = list(download_dir.rglob('*_temp.fits'))
+        if temp_files:
+            logger.info(f'Cleaning up {len(temp_files)} temporary files...')
+            for temp_file in temp_files:
+                try:
+                    temp_file.unlink()
+                    logger.debug(f'Removed temp file: {temp_file}')
+                except Exception as e:
+                    logger.warning(f'Could not remove temp file {temp_file}: {e}')
+    except Exception as e:
+        logger.warning(f'Error during temp file cleanup: {e}')
