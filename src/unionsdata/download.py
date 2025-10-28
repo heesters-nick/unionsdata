@@ -1,14 +1,12 @@
 import logging
-import multiprocessing
 import posixpath
 import queue
 import subprocess
 import threading
 import time
-from multiprocessing import Event, JoinableQueue
-from multiprocessing.queues import JoinableQueue as JoinableQueueT
-from multiprocessing.synchronize import Event as EventT
 from pathlib import Path
+from queue import Queue
+from threading import Event
 from typing import TypedDict
 
 import numpy as np
@@ -142,10 +140,10 @@ def download_tile_one_band(
 
 
 def download_worker(
-    download_queue: JoinableQueueT[tuple[tuple[int, int], str]],
+    download_queue: Queue[tuple[tuple[int, int], str]],
     band_dictionary: dict[str, BandDict],
     download_dir: Path,
-    shutdown_flag: EventT,
+    shutdown_flag: Event,
     requested_bands: set[str],
     tile_progress: dict[str, set[str]],
 ) -> None:
@@ -204,10 +202,10 @@ def download_worker(
                     # Track progress for this tile (fix for Manager dict with sets)
                     tile_str_key = f'{tile[0]:03d}_{tile[1]:03d}'
 
-                    # Get current set, modify it, and reassign to ensure Manager detects change
-                    current_bands = tile_progress.get(tile_str_key, set())
-                    current_bands.add(band)
-                    tile_progress[tile_str_key] = current_bands
+                    # Update the set of downloaded bands for this tile
+                    if tile_str_key not in tile_progress:
+                        tile_progress[tile_str_key] = set()
+                    tile_progress[tile_str_key].add(band)
 
                     # Check if tile is complete in all requested bands
                     tile_bands = tile_progress[tile_str_key]
@@ -269,12 +267,11 @@ def download_tiles(
     """
 
     # Create queue and threading objects
-    download_queue: JoinableQueueT[tuple[tuple[int, int] | None, str | None]] = JoinableQueue()
+    download_queue: Queue[tuple[tuple[int, int] | None, str | None]] = Queue()
     shutdown_flag = Event()
 
     # Shared dictionary to track download progress per tile
-    manager = multiprocessing.Manager()
-    tile_progress = manager.dict()
+    tile_progress: dict[str, set[str]] = {}
 
     # Add all download jobs to queue
     for tile, band in tiles_to_download:
@@ -313,7 +310,7 @@ def download_tiles(
         logger.info('All download jobs completed')
 
         for tile_key, bands in tile_progress.items():
-            if requested_bands.issubset(bands):  # Fix: use issubset instead of >=
+            if requested_bands.issubset(bands):
                 complete_tiles.append(tile_key)
             else:
                 missing = requested_bands - bands
@@ -346,11 +343,12 @@ def download_tiles(
     completed_jobs = total_jobs - remaining_jobs
     failed_jobs = remaining_jobs
 
+    indent = ' ' * 50
     logger.info(
         f'Download summary:\n'
-        f'  {len(complete_tiles)} tiles downloaded\n'
-        f'  {completed_jobs}/{total_jobs} jobs completed\n'
-        f'  {failed_jobs} jobs failed'
+        f'{indent}{len(complete_tiles)} tiles downloaded in all requested bands.\n'
+        f'{indent}{completed_jobs}/{total_jobs} jobs completed.\n'
+        f'{indent}{failed_jobs} jobs failed.'
     )
 
     return total_jobs, completed_jobs, failed_jobs

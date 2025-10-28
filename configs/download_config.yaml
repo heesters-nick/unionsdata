@@ -17,7 +17,7 @@ tiles:
 
 inputs:
   # Choose the input source
-  source: "dataframe"                                            # all_available | tiles | coordinates | dataframe
+  source: "tiles"                                            # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [217, 292]
