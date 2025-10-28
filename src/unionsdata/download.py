@@ -232,7 +232,7 @@ def download_worker(
                         tile_progress[tile_str_key].add(band)
 
                         # Check if tile is complete in all requested bands
-                        tile_bands = tile_progress[tile_str_key]
+                        tile_bands = tile_progress[tile_str_key].copy()  # copy for thread safety
                         remaining_bands = requested_bands - tile_bands
 
                     logger.info(f'Tile {tile_str_key} downloaded in band {band}')
@@ -356,12 +356,12 @@ def download_tiles(
         if not shutdown_flag.is_set():
             logger.info('All download jobs completed')
 
-        for tile_key, bands in tile_progress.items():
-            if requested_bands.issubset(bands):
+        for tile_key, downloaded_bands in tile_progress.items():
+            if requested_bands.issubset(downloaded_bands):
                 complete_tiles.append(tile_key)
             else:
-                missing = requested_bands - bands
-                incomplete_tiles.append((tile_key, sorted(bands), sorted(missing)))
+                missing = requested_bands - downloaded_bands
+                incomplete_tiles.append((tile_key, sorted(downloaded_bands), sorted(missing)))
 
         if incomplete_tiles:
             logger.warning(f'{len(incomplete_tiles)} tiles incomplete:')
