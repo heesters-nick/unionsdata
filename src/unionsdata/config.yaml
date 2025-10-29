@@ -1,5 +1,13 @@
-# Set machine below and adjust paths if needed.
-machine: local   # canfar | narval | local
+# UNIONS Data Download Configuration
+#
+# After running 'unionsdata init', this file will be copied to:
+#   Linux/Mac: ~/.config/unionsdata/config.yaml
+#   Windows:   %APPDATA%/unionsdata/config.yaml
+#
+# Edit the paths under 'paths_by_machine' to match your system.
+#
+
+machine: local                                                     # canfar | narval | local
 
 logging:
   name: download_test
@@ -17,7 +25,7 @@ tiles:
 
 inputs:
   # Choose the input source
-  source: "tiles"                                            # all_available | tiles | coordinates | dataframe
+  source: "tiles"                                                  # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [217, 292]

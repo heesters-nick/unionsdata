@@ -1,7 +1,13 @@
 import argparse
+import importlib.metadata
 import logging
+import os
+import subprocess
+import sys
 import time
 from datetime import timedelta
+from importlib.resources import files
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -10,6 +16,7 @@ import yaml
 from unionsdata.config import (
     BandDict,
     ensure_runtime_dirs,
+    get_user_config_dir,
     load_settings,
     purge_previous_run,
     settings_to_dict,
@@ -24,68 +31,19 @@ from unionsdata.utils import (
 
 logger = logging.getLogger(__name__)
 
+try:
+    __version__ = importlib.metadata.version('unionsdata')
+except importlib.metadata.PackageNotFoundError:
+    # Development mode fallback
+    try:
+        import tomllib
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description='Download UNIONS survey imaging data',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Download specific tiles
-  python main.py --tiles 217 292 234 295
-
-  # Download by coordinates
-  python main.py --coordinates 227.3042 52.5285 231.4445 52.4447
-
-  # Use a dataframe with custom columns
-  python main.py --dataframe objects.csv
-
-  # Override config settings
-  python main.py --bands whigs-g cfis_lsb-r ps-i --threads 10 --update-tiles
-        """,
-    )
-    # Input source arguments (mutually exclusive)
-    input_group = parser.add_mutually_exclusive_group()
-    input_group.add_argument(
-        '--coordinates',
-        nargs='+',
-        type=float,
-        help='List of RA/Dec coordinate pairs: --coordinates ra1 dec1 ra2 dec2 ...',
-    )
-    input_group.add_argument(
-        '--dataframe',
-        type=str,
-        help='Path to CSV file containing coordinates',
-    )
-    input_group.add_argument(
-        '--tiles',
-        type=int,
-        nargs='+',
-        help='List of tile number pairs: --tiles x1 y1 x2 y2 ...',
-    )
-    input_group.add_argument(
-        '--all-tiles',
-        action='store_true',
-        help='Download all available tiles (use with caution!)',
-    )
-
-    # Runtime options
-    parser.add_argument(
-        '--bands',
-        nargs='+',
-        type=str,
-        choices=['cfis-u', 'whigs-g', 'cfis_lsb-r', 'ps-i', 'wishes-z', 'ps-z'],
-        help='Bands to download (overrides config file)',
-    )
-
-    parser.add_argument(
-        '--update-tiles',
-        action='store_true',
-        help='Update the local tile availability information before downloading',
-    )
-
-    return parser.parse_args()
+        pyproject_path = Path(__file__).parent.parent.parent / 'pyproject.toml'
+        with open(pyproject_path, 'rb') as f:
+            data = tomllib.load(f)
+        __version__ = data['project']['version']
+    except Exception:
+        __version__ = '0.1.0-dev'
 
 
 def build_cli_overrides(args: argparse.Namespace) -> dict[str, object]:
@@ -93,44 +51,51 @@ def build_cli_overrides(args: argparse.Namespace) -> dict[str, object]:
     overrides = {}
 
     # Bands override
-    if args.bands:
+    if hasattr(args, 'bands') and args.bands:
         overrides['bands'] = args.bands
 
-    if args.update_tiles:
+    if hasattr(args, 'update_tiles') and args.update_tiles:
         overrides['update_tiles'] = True
 
     # Input overrides (mutually exclusive)
-    if args.tiles:
+    if hasattr(args, 'tiles') and args.tiles:
         if len(args.tiles) % 2 != 0:
             raise ValueError('Tiles must be provided as pairs')
         overrides['tiles'] = [
             [args.tiles[i], args.tiles[i + 1]] for i in range(0, len(args.tiles), 2)
         ]
-    elif args.coordinates:
+    elif hasattr(args, 'coordinates') and args.coordinates:
         if len(args.coordinates) % 2 != 0:
             raise ValueError('Coordinates must be provided as pairs')
         overrides['coordinates'] = [
             [args.coordinates[i], args.coordinates[i + 1]]
             for i in range(0, len(args.coordinates), 2)
         ]
-    elif args.dataframe:
+    elif hasattr(args, 'dataframe') and args.dataframe:
         overrides['dataframe'] = args.dataframe
-    elif args.all_tiles:
+    elif hasattr(args, 'all_tiles') and args.all_tiles:
         overrides['all_tiles'] = True
 
     return overrides
 
 
-def main() -> None:
+def run_download(args: argparse.Namespace) -> None:
     """
     CLI entry point to download UNIONS survey image tiles.
     """
     start = time.time()
 
     # Parse arguments and load configuration
-    args = parse_arguments()
     overrides = build_cli_overrides(args)
-    cfg = load_settings(cli_overrides=overrides)
+    try:
+        cfg = load_settings(config_path=args.config, cli_overrides=overrides)
+        logger.info(f'Loaded config from: {cfg.config_source}')
+    except FileNotFoundError:
+        logger.error('No config file found!')
+        logger.info(
+            "Run 'unionsdata init' to create a config, or use --config /path/to/config.yaml"
+        )
+        sys.exit(1)
     # Get rid of any previous log files if resume = False
     purge_previous_run(cfg)
 
@@ -241,5 +206,210 @@ def main() -> None:
     )
 
 
+def run_init(args: argparse.Namespace) -> None:
+    """
+    Initialize user configuration by creating a config.yaml file. If the file
+    already exists, it will not be overwritten unless --force is specified.
+    """
+    logger = logging.getLogger(__name__)  # Get logger for this command
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+    user_config_dir = get_user_config_dir()
+    user_config_path = user_config_dir / 'config.yaml'
+
+    logger.info(f'User config directory: {user_config_dir}')
+
+    # Create the directory if it doesn't exist
+    try:
+        user_config_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f'Failed to create config directory: {e}')
+        sys.exit(1)
+
+    # Check if config file already exists
+    if user_config_path.exists() and not args.force:
+        logger.warning(f'Config file already exists at: {user_config_path}')
+        logger.info('Run with --force to overwrite.')
+        return
+
+    # Read the template file from the package
+    try:
+        template_path = files('unionsdata').joinpath('config.yaml')
+        template_content = template_path.read_text(encoding='utf-8')
+
+        with open(user_config_path, 'w', encoding='utf-8') as f:
+            f.write(template_content)
+
+        logger.info(f'Successfully created config file at: {user_config_path}')
+        logger.info('You can now edit this file with your custom paths.')
+
+    except FileNotFoundError:
+        logger.error('Could not find the config template within the package.')
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f'Failed to write config file: {e}')
+        sys.exit(1)
+
+
+def run_edit(args: argparse.Namespace) -> None:
+    """
+    Open the user configuration file in the system's default editor.
+    """
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+    user_config_path = get_user_config_dir() / 'config.yaml'
+
+    if not user_config_path.exists():
+        logger.error(f'No config file found at: {user_config_path}')
+        logger.info("Please run 'unionsdata init' first.")
+        sys.exit(1)
+
+    # Get the system's default editor
+    editor = os.environ.get('EDITOR', 'vim' if sys.platform != 'win32' else 'notepad')
+
+    logger.info(f'Opening {user_config_path} with {editor}...')
+    try:
+        subprocess.run([editor, str(user_config_path)], check=True)
+    except subprocess.CalledProcessError:
+        logger.error('Editor exited with an error')
+        sys.exit(1)
+    except FileNotFoundError:
+        logger.error(f'Editor "{editor}" not found. Set EDITOR environment variable.')
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f'Failed to open editor: {e}')
+        sys.exit(1)
+
+
+def run_validate(args: argparse.Namespace) -> None:
+    """Validate the configuration file."""
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+    try:
+        cfg = load_settings(config_path=args.config)
+        logger.info('✓ Config is valid!')
+        logger.info(f'Loaded from: {cfg.config_source}')
+    except Exception as e:
+        logger.error(f'✗ Config validation failed: {e}')
+        sys.exit(1)
+
+
+def cli_entry() -> None:
+    """
+    The main CLI entry point that dispatches to subcommands.
+    """
+    parser = argparse.ArgumentParser(
+        description='UNIONS data download tool.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    # Add a global --config flag
+    parser.add_argument(
+        '--config', type=Path, help='Path to a specific config file (overrides default search)'
+    )
+
+    parser.add_argument(
+        '--show-config', action='store_true', help='Print the resolved config path and exit'
+    )
+
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
+    )
+
+    subparsers = parser.add_subparsers(dest='command', required=False)
+
+    # --- 'init' subcommand ---
+    parser_init = subparsers.add_parser('init', help='Create a new user config file')
+    parser_init.add_argument('--force', action='store_true', help='Overwrite existing config file')
+    parser_init.set_defaults(func=run_init)
+
+    # --- 'edit' subcommand ---
+    parser_edit = subparsers.add_parser(
+        'edit', help='Open the user config file in your default editor'
+    )
+    parser_edit.set_defaults(func=run_edit)
+
+    # --- 'validate' subcommand ---
+    parser_validate = subparsers.add_parser('validate', help='Check if config is valid')
+    parser_validate.set_defaults(func=run_validate)
+
+    # --- 'download' subcommand ---
+    parser_download = subparsers.add_parser(
+        'download',
+        help='Download UNIONS survey imaging data (default command)',
+        aliases=['run'],  # You can add aliases
+    )
+    # Add all your original arguments from parse_arguments() here
+    input_group = parser_download.add_mutually_exclusive_group()
+    input_group.add_argument(
+        '--coordinates',
+        nargs='+',
+        type=float,
+        help='List of RA/Dec coordinate pairs: --coordinates ra1 dec1 ra2 dec2 ...',
+    )
+    input_group.add_argument(
+        '--dataframe',
+        type=str,
+        help='Path to CSV file containing coordinates',
+    )
+    input_group.add_argument(
+        '--tiles',
+        type=int,
+        nargs='+',
+        help='List of tile number pairs: --tiles x1 y1 x2 y2 ...',
+    )
+    input_group.add_argument(
+        '--all-tiles',
+        action='store_true',
+        help='Download all available tiles (use with caution!)',
+    )
+    parser_download.add_argument(
+        '--bands',
+        nargs='+',
+        type=str,
+        choices=['cfis-u', 'whigs-g', 'cfis_lsb-r', 'ps-i', 'wishes-z', 'ps-z'],
+        help='Bands to download (overrides config file)',
+    )
+
+    parser_download.add_argument(
+        '--update-tiles',
+        action='store_true',
+        help='Update the local tile availability information before downloading',
+    )
+    parser_download.set_defaults(func=run_download)
+
+    # Parse args
+    args = parser.parse_args()
+
+    # Handle --show-config global flag
+    if hasattr(args, 'show_config') and args.show_config:
+        try:
+            cfg = load_settings(config_path=args.config)
+            cfg_dict = settings_to_dict(cfg)
+            cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
+            print(f'#################### Configuration ####################\n\n{cfg_yaml}')
+            print('########################################################')
+            sys.exit(0)
+        except FileNotFoundError as e:
+            logger.error(f'Config file not found: {e}')
+            logger.info("Run 'unionsdata init' to create a config file")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f'Error loading config: {e}')
+            sys.exit(1)
+
+    # If no subcommand specified, default to 'download'
+    if args.command is None:
+        # Re-parse with download subcommand to get all its arguments
+        sys.argv.insert(1, 'download')
+        args = parser.parse_args()
+
+    # Call the function associated with the chosen subcommand
+    args.func(args)
+
+
 if __name__ == '__main__':
-    main()
+    cli_entry()

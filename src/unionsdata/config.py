@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -146,6 +147,7 @@ class Settings(BaseModel):
     inputs: InputsCfg
     bands: dict[str, BandCfg]
     paths: PathsResolved
+    config_source: Path | None = None  # Path to the config file used
 
     @model_validator(mode='after')
     def _validate(self) -> Settings:
@@ -237,6 +239,7 @@ def load_settings(
         inputs=raw.inputs,
         bands=raw.bands,
         paths=paths,
+        config_source=config_path,
     )
 
     logger.info(f'Configuration loaded successfully for machine: {raw.machine}')
@@ -423,10 +426,9 @@ def find_config_file(explicit_path: Path | None = None) -> Path:
 
     Search order:
     1. Explicit path provided by user (if given)
-    2. ./configs/download_config.yaml (dev/editable install)
-    3. ./download_config.yaml (current directory)
-    4. ~/.config/unionsdata/config.yaml (user config - for future pip install)
-    5. ../configs/download_config.yaml (one level up)
+    2. ./config.yaml (current directory)
+    3. ~/.config/unionsdata/config.yaml (user config)
+    4. src/unionsdata/config.yaml (ONLY in editable/development mode)
 
     Args:
         explicit_path: User-provided config path (highest priority)
@@ -445,10 +447,8 @@ def find_config_file(explicit_path: Path | None = None) -> Path:
 
     # Search standard locations
     search_paths = [
-        Path('configs/download_config.yaml'),  # Dev install
-        Path('download_config.yaml'),  # Current directory
-        get_user_config_dir() / 'config.yaml',  # User config (pip)
-        Path('../configs/download_config.yaml'),  # One level up
+        Path('config.yaml'),  # Current directory
+        get_user_config_dir() / 'config.yaml',  # User config
     ]
 
     for search_path in search_paths:
@@ -456,11 +456,26 @@ def find_config_file(explicit_path: Path | None = None) -> Path:
             logger.debug(f'Found config file at: {search_path}')
             return search_path
 
+    # Check if we're in editable/development mode
+    try:
+        package_config = files('unionsdata').joinpath('config.yaml')
+        package_config_path = Path(str(package_config))
+
+        # Only use package config if it's in a 'src' directory (editable install)
+        if 'src' in package_config_path.parts and package_config_path.exists():
+            logger.debug(f'Found config in development mode: {package_config_path}')
+            return package_config_path
+    except Exception:
+        pass
+
     # No config found anywhere
     raise FileNotFoundError(
         'Config file not found. Searched locations:\n'
         + '\n'.join(f'  - {p}' for p in search_paths)
-        + '\n\nPlease create a config file or specify path with --config'
+        + '\n\nTo set up your configuration:\n'
+        + "  1. Run 'unionsdata init' to create a config file\n"
+        + "  2. Run 'unionsdata edit' to customize it with your paths\n"
+        + '  3. Or use --config /path/to/your/config.yaml'
     )
 
 

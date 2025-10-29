@@ -47,7 +47,15 @@ dev = [
 
 # ---- Console script entry points ----
 [project.scripts]
-udownload = "unionsdata.main:main"
+unionsdata = "unionsdata.main:cli_entry"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unionsdata"]
+
+[tool.hatch.build]
+include = [
+    "src/unionsdata/config.yaml"
+]
 
 # ---- Test configuration ----
 [tool.pytest.ini_options]
