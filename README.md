@@ -1,19 +1,6 @@
 # UNIONSdata
 
-A Python package for downloading multi-band imaging data from the Ultraviolet Near Infrared Optical Northern Survey ([UNIONS](https://www.skysurvey.cc/)). The package downloads the reduced images from the VOS vault.
-
-## Overview
-
-UNIONSdata provides a streamlined interface for downloading reduced images from the UNIONS survey hosted on the CANFAR VOSpace vault. The package supports multi-threaded downloads, automatic tile discovery, and flexible input methods (coordinates, tile numbers, or CSV catalogs).
-
-### Supported bands
-
-- **cfis-u**: CFIS u-band
-- **whigs-g**: WHIGS g-band
-- **cfis_lsb-r**: CFIS r-band (optimized for low-surface-brightness science)
-- **ps-i**: Pan-STARRS i-band
-- **wishes-z**: WISHES z-band
-- **ps-z**: Pan-STARRS z-band
+A Python package for downloading multi-band imaging data from the Ultraviolet Near Infrared Optical Northern Survey ([UNIONS](https://www.skysurvey.cc/)). The package downloads the reduced images from the CANFAR VOSpace vault using the [vos tool](https://pypi.org/project/vos/).
 
 ## Features
 
@@ -22,7 +9,24 @@ UNIONSdata provides a streamlined interface for downloading reduced images from 
 🌳 **Spatial indexing** - KD-tree for efficient tile-to-coordinate matching\
 📊 **Progress tracking** - Real-time download status and completion reports\
 ⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
-🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup\
+🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup
+
+## Quick Start
+
+```bash
+# Install
+pip install unionsdata
+
+# Setup (opens config in editor)
+unionsdata init
+unionsdata edit  # Set your paths
+
+# Get credentials (valid 10 days)
+cadc-get-cert -u YOUR_CANFAR_USERNAME
+
+# Download tiles
+unionsdata download --tiles 217 292 --bands whigs-g cfis_lsb-r ps-i
+```
 
 ## Prerequisites
 
@@ -32,52 +36,39 @@ UNIONSdata provides a streamlined interface for downloading reduced images from 
 2. **UNIONS survey membership**\
     Until the first public data release only collaboration members have access to the data.
 
-2. **Python 3.13.1+**
+3. **Valid X.509 certificate for VOSpace access**\
+    See below.
 
-3. **System Dependencies**
-   - Astropy 7.1.0+
-   - Common scientific packages (see pyproject.toml)
-   - Valid X.509 certificate for VOSpace access
+4. **System dependencies**\
+    Installed automatically (see pyproject.toml)
 
-## Installation
+## Installation & Setup
 
-### From Source
+### Option 1: Install from PyPI (Recommended)
 
-```bash
-# Clone the repository
-git clone https://github.com/heesters-nick/unionsdata.git
-cd unionsdata
-
-# Install in development mode
-pip install -e ".[dev]"
-```
-
-### Using pip (coming soon)
+**Step 1:** Install the package
 
 ```bash
 pip install unionsdata
 ```
 
-## Setup
-
-### 1. Obtain CANFAR Credentials
-
-Generate your X.509 certificate for VOSpace access:
+**Step 2:** Initialize the configuration file
 
 ```bash
-cadc-get-cert -u YOUR_CANFAR_USERNAME
+unionsdata init
 ```
-Type your CANFAR password. This creates a certificate at `~/.ssl/cadcproxy.pem` that's valid for 10 days.
 
-### 2. Configure Download Settings
+This creates your configuration file at:
+- **Linux/Mac**: `~/.config/unionsdata/config.yaml`
+- **Windows**: `%APPDATA%/unionsdata/config.yaml`
 
-Edit the configuration file in
+**Step 3:** Edit the configuration
 
 ```bash
-configs/download_config.yaml
+unionsdata edit
 ```
 
-Edit the paths for your machine:
+This opens the config file in your default editor. Update the paths and other parameters:
 
 ```yaml
 machine: local
@@ -85,66 +76,149 @@ machine: local
 paths_by_machine:
   local:
     root_dir_main: "/path/to/your/project"
+    # **Important**: define location for downloaded data
     root_dir_data: "/path/to/download/data"
+```
+
+**Step 4:** Set up CANFAR credentials
+
+> 🔑 **Important:** Credentials expire after 10 days. Re-run this command when needed.
+
+```bash
+cadc-get-cert -u YOUR_CANFAR_USERNAME
+```
+
+**Step 5:** Validate your configuration
+
+```bash
+unionsdata validate
+```
+
+### Option 2: Install from Source (For Development)
+
+**Step 1:** Clone and install
+
+```bash
+# Clone the repository
+git clone https://github.com/heesters-nick/unionsdata.git
+
+# Change into the cloned repository
+cd unionsdata
+
+# Install in editable development mode
+pip install -e ".[dev]"
+```
+
+**Step 2:** Edit the configuration file directly at `src/unionsdata/config.yaml`
+
+Update the paths:
+
+```yaml
+machine: local
+
+paths_by_machine:
+  local:
+    root_dir_main: "/path/to/your/project"
+    # **Important**: define location for downloaded data
+    root_dir_data: "/path/to/download/data"
+```
+
+**Step 3:** Set up CANFAR credentials
+
+```bash
+cadc-get-cert -u YOUR_CANFAR_USERNAME
+```
+
+**Step 4:** Validate your configuration
+
+```bash
+unionsdata validate
 ```
 
 ## Usage
 
 ### Command Line Interface
 
-The package installs a `udownload` command for easy access.
+The package provides a `unionsdata` command with several subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `unionsdata init` | Initialize configuration file (first-time setup) |
+| `unionsdata edit` | Open configuration file in default editor |
+| `unionsdata validate` | Validate your configuration |
+| `unionsdata download` | Start downloading data |
+| `unionsdata` | Shortcut for `unionsdata download` |
+
+
 
 #### Download Specific Tiles
 
-```bash
-# Download tiles by tile numbers (x, y pairs)
-udownload --tiles 217 292 234 295
+Download tiles by their tile numbers (x, y pairs):
 
-# Download specific bands only
-udownload --tiles 217 292 --bands whigs-g cfis_lsb-r ps-i
+```bash
+unionsdata download --tiles 217 292 234 295
+```
+
+Download specific bands only:
+
+```bash
+unionsdata download --tiles 217 292 --bands whigs-g cfis_lsb-r ps-i
 ```
 
 #### Download by Coordinates
 
+Download tiles containing specific RA/Dec coordinates (in degrees):
+
 ```bash
-# Download tiles containing these RA/Dec coordinates
-udownload --coordinates 227.3042 52.5285 231.4445 52.4447
+unionsdata download --coordinates 227.3042 52.5285 231.4445 52.4447
 ```
 
 #### Download from CSV Catalog
 
+Download tiles for objects in a CSV file:
+
 ```bash
-# Use a CSV file with RA, Dec, and ID columns
-udownload --dataframe /path/to/catalog.csv
+unionsdata download --dataframe /path/to/catalog.csv
 ```
 
-Your CSV should have columns for RA, Dec, and object ID (customizable in config):
+Your CSV should have columns for RA, Dec, and object ID. Example:
 
 ```csv
 ID,ra,dec
-1,227.3042,52.5285
+M101,210.8022,54.3489
 2,231.4445,52.4447
 ```
 
+> **Note:** Column names are customizable in the configuration file.
+
 #### Download All Available Tiles
 
+> **⚠️ Warning:** This will download a large amount of data!
+
 ```bash
-# ⚠️ Warning: This will download a large amount of data!
-udownload --all-tiles --bands whigs-g cfis_lsb-r
+unionsdata download --all-tiles --bands whigs-g cfis_lsb-r
 ```
 
-### Configuration File Usage
+### Using Configuration File
 
-Alternatively, configure inputs in `configs/download_config.yaml`:
+Instead of command-line arguments, you can configure downloads in your config file.
+
+Example configuration:
 
 ```yaml
+machine: local
+
+logging:
+  name: download_test
+  level: INFO
+
 runtime:
   n_download_threads: 12
   bands: ["whigs-g", "cfis_lsb-r", "ps-i"]
   resume: false
 
 inputs:
-  source: "tiles"  # or "coordinates", "dataframe", "all_available"
+  source: "tiles"  # Options: tiles, coordinates, dataframe, all_available
   tiles:
     - [217, 292]
     - [234, 295]
@@ -154,7 +228,6 @@ inputs:
 
   dataframe:
     path: "/path/to/catalog.csv"
-    # Specify the column names for RA/Dec/ID in your table
     columns:
       ra: "ra"
       dec: "dec"
@@ -164,8 +237,25 @@ inputs:
 Then run:
 
 ```bash
-udownload
+unionsdata download
 ```
+
+Or simply:
+
+```bash
+unionsdata
+```
+
+## Supported Bands
+
+| Band | Survey | Filter |
+|------|--------|--------|
+| `cfis-u` | CFIS | u-band |
+| `whigs-g` | WHIGS | g-band |
+| `cfis_lsb-r` | CFIS | r-band (LSB optimized) |
+| `ps-i` | Pan-STARRS | i-band |
+| `wishes-z` | WISHES | z-band |
+| `ps-z` | Pan-STARRS | z-band |
 
 ## Output Structure
 
@@ -214,6 +304,36 @@ bands:
     zp: 27.0  # Zero point magnitude
 ```
 
+> **Note:** Data paths or file formats may change over time. Check the [CANFAR vault](https://www.canfar.net/storage/vault/list/cfis) for current locations:
+
+| Band | vault directory |
+|------|--------|
+| `cfis-u` | tiles_DR6 |
+| `whigs-g` | whigs |
+| `cfis_lsb-r` | tiles_LSB_DR6 |
+| `ps-i` | panstarrs |
+| `wishes-z` | wishes_1 |
+| `ps-z` | panstarrs |
+
+## Troubleshooting
+
+### Certificate Expired
+
+```bash
+cadc-get-cert -u YOUR_CANFAR_USERNAME
+```
+
+### Config Issues
+
+```bash
+# Check config
+unionsdata validate
+# Reset (Linux/Mac)
+rm ~/.config/unionsdata/config.yaml
+# Create a fresh copy
+unionsdata init
+```
+
 ## Acknowledgments
 
 - UNIONS collaboration
@@ -225,11 +345,12 @@ bands:
 - [**CANFAR**](https://www.canfar.net/)
 - [**CANFAR Storage Documentation**](https://www.opencadc.org/canfar/latest/platform/storage/)
 - [**CANFAR VOSpace Documentation**](https://www.opencadc.org/canfar/latest/platform/storage/vospace/)
+- [**vostools**](https://github.com/opencadc/vostools)
 
 ## Support
 
 For issues and questions:
 - Open an issue on GitHub
-- Contact: [nick.heesters@epfl.ch]
+- Contact: nick.heesters@epfl.ch
 
 ---

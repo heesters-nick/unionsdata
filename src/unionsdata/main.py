@@ -295,9 +295,8 @@ def run_validate(args: argparse.Namespace) -> None:
     """Validate the configuration file."""
 
     try:
-        cfg = load_settings(config_path=args.config)
+        _ = load_settings(config_path=args.config)
         logger.info('✓ Config is valid!')
-        logger.info(f'Loaded from: {cfg.config_source}')
     except Exception as e:
         logger.error(f'✗ Config validation failed: {e}')
         sys.exit(1)
