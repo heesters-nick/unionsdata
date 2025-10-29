@@ -198,15 +198,21 @@ def tile_finder(
     """
     if catalog is None or coord_c is None:
         return None, None, pd.DataFrame()
+
+    # This helps the type checker
+    assert coord_c is not None
+    assert catalog is not None
+
     available_tiles = avail.unique_tiles
     tiles_matching_catalog = np.empty(len(catalog), dtype=object)
     pix_coords = np.empty((len(catalog), 2), dtype=np.float64)
     bands = np.empty(len(catalog), dtype=object)
     n_bands = np.empty(len(catalog), dtype=np.int32)
     for i, obj_coord in enumerate(coord_c):
+        assert obj_coord is not None
         tile_numbers, _ = query_tree(
             available_tiles,
-            np.array([obj_coord.ra.deg, obj_coord.dec.deg]),  # type: ignore
+            np.array([obj_coord.ra.deg, obj_coord.dec.deg]),
             tile_info_dir,
         )
         tiles_matching_catalog[i] = tile_numbers
@@ -512,6 +518,9 @@ def input_to_tile_list(
         catalog, coord_c = import_coordinates(
             inputs.coordinates, ra_key_default, dec_key_default, id_key_default
         )
+        if coord_c is None:
+            logger.error('Failed to load coordinates.')
+            return None, None, pd.DataFrame()
     elif source == 'dataframe':
         catalog, coord_c = import_dataframe(
             inputs.dataframe.path,
@@ -519,6 +528,9 @@ def input_to_tile_list(
             inputs.dataframe.columns.dec,
             inputs.dataframe.columns.id,
         )
+        if coord_c is None:
+            logger.error('Failed to load coordinates from dataframe')
+            return None, None, pd.DataFrame()
     elif source == 'tiles':
         return (
             None,

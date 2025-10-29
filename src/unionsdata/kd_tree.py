@@ -5,6 +5,7 @@ import joblib
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
+from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def build_tree(tiles: list[tuple[int, int]], tile_info_dir: Path, save: bool = T
 
 
 def query_tree(
-    tiles: list[tuple[int, int]], coords: list[float], tile_info_dir: Path
+    tiles: list[tuple[int, int]], coords: NDArray[np.float64], tile_info_dir: Path
 ) -> tuple[tuple[int, int], float]:
     """
     Query the kd tree to find what tile an object is in.
@@ -87,7 +88,7 @@ class TileWCS:
 
 
 def find_tile(
-    tree: cKDTree, tiles: list[tuple[int, int]], object_coord: list[float]
+    tree: cKDTree, tiles: list[tuple[int, int]], object_coord: NDArray[np.float64]
 ) -> tuple[tuple[int, int], float]:
     """
     Query the tree and find the tile the object is in.
