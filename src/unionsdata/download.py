@@ -123,7 +123,7 @@ def download_tile_one_band(
                 except subprocess.TimeoutExpired:
                     process.kill()
                 # Clean up temp file if it exists
-                # cleanup_temp_file(temp_path)
+                cleanup_temp_file(temp_path)
                 return False
             time.sleep(0.1)
 
@@ -147,20 +147,20 @@ def download_tile_one_band(
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.error(f'Subprocess error details: {e}')
         # Clean up temp file on error
-        # cleanup_temp_file(temp_path)
+        cleanup_temp_file(temp_path)
         return False
 
     except FileNotFoundError:
         logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
         logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
         # Clean up temp file on error
-        # cleanup_temp_file(temp_path)
+        cleanup_temp_file(temp_path)
         return False
 
     except Exception as e:
         logger.error(f'Tile {tile_str(tile_numbers)} in {band}: an unexpected error occurred: {e}')
         # Clean up temp file on error
-        # cleanup_temp_file(temp_path)
+        cleanup_temp_file(temp_path)
         return False
 
 

@@ -24,11 +24,6 @@ from unionsdata.utils import (
 
 logger = logging.getLogger(__name__)
 
-# To work with the client you need to get CANFAR X509 certificates
-# Run these lines on the command line:
-# cadc-get-cert -u yourusername
-# cp ${HOME}/.ssl/cadcproxy.pem .
-
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""

@@ -253,10 +253,10 @@ def get_tile_numbers(name: str) -> tuple[int, int]:
 
     matches = pattern.findall(name)
 
-    num1 = int(matches[0])
-    num2 = int(matches[1])
+    if len(matches) < 2:
+        raise ValueError(f'Could not extract tile numbers from filename: {name}')
 
-    return num1, num2
+    return int(matches[0]), int(matches[1])
 
 
 def extract_tile_numbers(
