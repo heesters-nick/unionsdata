@@ -69,7 +69,7 @@ class InputsCfg(BaseModel):
     dataframe: InputsDataFrame = Field(default_factory=InputsDataFrame)
 
 
-class PathsCommon(BaseModel):
+class PathsDatabase(BaseModel):
     """Common path directory names."""
 
     model_config = ConfigDict(extra='forbid')
@@ -121,7 +121,7 @@ class RawConfig(BaseModel):
     runtime: RuntimeCfg
     tiles: TilesCfg
     inputs: InputsCfg
-    paths_common: PathsCommon
+    paths_database: PathsDatabase
     paths_by_machine: dict[str, PathsByMachineEntry]
     bands: dict[str, BandCfg]
 
@@ -220,15 +220,29 @@ def load_settings(
 
     # Resolve paths
     pm = raw.paths_by_machine[raw.machine]
-    pc = raw.paths_common
+    pc = raw.paths_database
 
     root = pm.root_dir_main
-    paths = PathsResolved(
-        root_dir_main=root,
-        root_dir_data=pm.root_dir_data,
-        tile_info_directory=root / pc.tile_info_dirname,
-        log_directory=root / pc.logs_dirname,
-    )
+
+    # For pip installs, use XDG directories instead of config root
+    # Check if we're in a "real" installation (not editable mode)
+    if root == Path.home():
+        # Use XDG data directory
+        data_base = get_user_data_dir()
+        paths = PathsResolved(
+            root_dir_main=data_base,
+            root_dir_data=pm.root_dir_data,
+            tile_info_directory=data_base / pc.tile_info_dirname,
+            log_directory=data_base / pc.logs_dirname,
+        )
+    else:
+        # Use config-specified paths (development/custom setup)
+        paths = PathsResolved(
+            root_dir_main=root,
+            root_dir_data=pm.root_dir_data,
+            tile_info_directory=root / pc.tile_info_dirname,
+            log_directory=root / pc.logs_dirname,
+        )
 
     # Build final settings
     settings = Settings(

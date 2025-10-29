@@ -114,8 +114,13 @@ def run_download(args: argparse.Namespace) -> None:
     cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
     logger.info(f'Resolved config (YAML):\n{cfg_yaml}')
 
+    all_band_dict: dict[str, BandDict] = {
+        k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
+        for k in cfg.bands.keys()  # ALL bands, not just cfg.runtime.bands
+    }
+
     # filter considered bands from the full band dictionary
-    band_dict: dict[str, BandDict] = {
+    selected_band_dict: dict[str, BandDict] = {
         k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
     }
     # make sure necessary directories exist
@@ -128,12 +133,18 @@ def run_download(args: argparse.Namespace) -> None:
 
     # Query availability of tiles
     logger.info('Querying tile availability...')
-    availability, all_tiles = query_availability(
+    _, all_tiles = query_availability(
         update=cfg.tiles.update_tiles,
-        in_dict=band_dict,
+        in_dict=all_band_dict,
         show_stats=cfg.tiles.show_tile_statistics,
         tile_info_dir=tile_info_dir,
     )
+
+    # Filter tiles to only those in selected bands
+    selected_tiles = [
+        all_tiles[list(all_band_dict.keys()).index(band)] for band in cfg.runtime.bands
+    ]
+    availability = TileAvailability(selected_tiles, selected_band_dict)
 
     # Process input to get list of tiles to download
     logger.info('Processing input to determine tiles to download...')
@@ -146,11 +157,13 @@ def run_download(args: argparse.Namespace) -> None:
     )
 
     if tiles_x_bands is not None:
+        logger.info(f'Filtering to {len(tiles_x_bands)} tiles based on input criteria')
         tiles_set = set(tiles_x_bands)  # Convert list to set for faster lookup
-        selected_all_tiles = [
-            [tile for tile in band_tiles if tile in tiles_set] for band_tiles in all_tiles
+
+        filtered_tiles = [
+            [tile for tile in band_tiles if tile in tiles_set] for band_tiles in selected_tiles
         ]
-        availability = TileAvailability(selected_all_tiles, band_dict)
+        availability = TileAvailability(filtered_tiles, selected_band_dict)
 
     # Get tiles available in the specified bands and create download jobs
     logger.info(f'Getting tiles available in bands: {bands}')
@@ -184,7 +197,7 @@ def run_download(args: argparse.Namespace) -> None:
     try:
         total_jobs, completed_jobs, failed_jobs = download_tiles(
             tiles_to_download=download_jobs,
-            band_dictionary=band_dict,
+            band_dictionary=selected_band_dict,
             download_dir=download_dir,
             requested_bands=set(bands),  # Pass requested bands as a set
             num_threads=download_threads,

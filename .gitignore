@@ -11,3 +11,4 @@ figures/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+tile_info*/

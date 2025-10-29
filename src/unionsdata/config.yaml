@@ -43,12 +43,17 @@ inputs:
       dec: "dec"                                                   # Declination column name
       id: "ID"                                                     # ID column name
 
-paths_common:
+paths_database:
   # These are joined under root_dir_main
+  # No need to change these
   tile_info_dirname: "tile_info"
   logs_dirname:      "logs"
 
 paths_by_machine:
+  local:
+    root_dir_main: "/home/nick/astro/unionsdata"
+    root_dir_data: "/home/nick/astro/unionsdata/data"
+
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"
     root_dir_data: "/arc/projects/unions"
@@ -56,10 +61,6 @@ paths_by_machine:
   narval:
     root_dir_main: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer"
     root_dir_data: "/home/heesters/projects/def-sfabbro/heesters/data/unions"
-
-  local:
-    root_dir_main: "/home/nick/astro/unionsdata"
-    root_dir_data: "/home/nick/astro/unionsdata/data"
 
 bands:
   cfis-u:
