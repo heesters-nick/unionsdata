@@ -224,8 +224,6 @@ def run_init(args: argparse.Namespace) -> None:
     Initialize user configuration by creating a config.yaml file. If the file
     already exists, it will not be overwritten unless --force is specified.
     """
-    logger = logging.getLogger(__name__)  # Get logger for this command
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     user_config_dir = get_user_config_dir()
     user_config_path = user_config_dir / 'config.yaml'
@@ -268,8 +266,6 @@ def run_edit(args: argparse.Namespace) -> None:
     """
     Open the user configuration file in the system's default editor.
     """
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     user_config_path = get_user_config_dir() / 'config.yaml'
 
@@ -297,8 +293,6 @@ def run_edit(args: argparse.Namespace) -> None:
 
 def run_validate(args: argparse.Namespace) -> None:
     """Validate the configuration file."""
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     try:
         cfg = load_settings(config_path=args.config)
@@ -313,11 +307,13 @@ def cli_entry() -> None:
     """
     The main CLI entry point that dispatches to subcommands.
     """
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s', force=True)
+
     parser = argparse.ArgumentParser(
         description='UNIONS data download tool.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    # Add a global --config flag
+    # --- Global arguments ---
     parser.add_argument(
         '--config', type=Path, help='Path to a specific config file (overrides default search)'
     )
@@ -394,6 +390,25 @@ def cli_entry() -> None:
     )
     parser_download.set_defaults(func=run_download)
 
+    # --- Determine known subcommands and global flags ---
+    known_subcommands = set(subparsers.choices.keys())
+
+    global_flags = {
+        action.option_strings[0]  # Get first option string (e.g., '--config')
+        for action in parser._actions
+        if action.option_strings  # Only actions with option strings (flags)
+    }
+
+    if len(sys.argv) > 1:
+        first_arg = sys.argv[1]
+
+        # Only inject 'download' if first arg is NOT a subcommand and NOT a global flag
+        if first_arg not in known_subcommands and first_arg not in global_flags:
+            sys.argv.insert(1, 'download')
+    else:
+        # No arguments at all: default to 'download'
+        sys.argv.append('download')
+
     # Parse args
     args = parser.parse_args()
 
@@ -413,12 +428,6 @@ def cli_entry() -> None:
         except Exception as e:
             logger.error(f'Error loading config: {e}')
             sys.exit(1)
-
-    # If no subcommand specified, default to 'download'
-    if args.command is None:
-        # Re-parse with download subcommand to get all its arguments
-        sys.argv.insert(1, 'download')
-        args = parser.parse_args()
 
     # Call the function associated with the chosen subcommand
     args.func(args)

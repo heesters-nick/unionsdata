@@ -5,7 +5,7 @@ import joblib
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
-from scipy.spatial import cKDTree  # type: ignore
+from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +130,19 @@ def relate_coord_tile(
 
     Returns:
         tuple: depending on the input, return the tile numbers or the ra and dec coordinates
+
+    Raises:
+        ValueError: if neither coords nor nums are provided
     """
     if coords:
         ra, dec = coords
         xxx = ra * 2 * np.cos(np.radians(dec))
         yyy = (dec + 90) * 2
         return int(xxx), int(yyy)
-    else:
-        xxx, yyy = nums  # type: ignore
+    elif nums:
+        xxx, yyy = nums
         dec = yyy / 2 - 90
         ra = xxx / 2 / np.cos(np.radians(dec))
         return np.round(ra, 12), np.round(dec, 12)
+    else:
+        raise ValueError('Either coords or nums must be provided.')

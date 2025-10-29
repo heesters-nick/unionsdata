@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from importlib.metadata import distribution
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -224,9 +225,27 @@ def load_settings(
 
     root = pm.root_dir_main
 
-    # For pip installs, use XDG directories instead of config root
-    # Check if we're in a "real" installation (not editable mode)
-    if root == Path.home():
+    # Check if we're in editable/dev mode
+    try:
+        dist = distribution('unionsdata')
+        # Editable installs have .egg-link or direct_url.json
+        is_editable = (
+            any(f.name in ('direct_url.json', 'top_level.txt') for f in dist.files or [])
+            if dist.files
+            else False
+        )
+    except Exception:
+        is_editable = False
+
+    if is_editable or root != Path.home():
+        # Use config-specified paths (development/custom setup)
+        paths = PathsResolved(
+            root_dir_main=root,
+            root_dir_data=pm.root_dir_data,
+            tile_info_directory=root / pc.tile_info_dirname,
+            log_directory=root / pc.logs_dirname,
+        )
+    else:
         # Use XDG data directory
         data_base = get_user_data_dir()
         paths = PathsResolved(
@@ -235,14 +254,18 @@ def load_settings(
             tile_info_directory=data_base / pc.tile_info_dirname,
             log_directory=data_base / pc.logs_dirname,
         )
-    else:
-        # Use config-specified paths (development/custom setup)
-        paths = PathsResolved(
-            root_dir_main=root,
-            root_dir_data=pm.root_dir_data,
-            tile_info_directory=root / pc.tile_info_dirname,
-            log_directory=root / pc.logs_dirname,
-        )
+
+    # Check for first run and auto-enable update_tiles if needed
+    if is_first_run(paths.tile_info_directory):
+        logger.info('=' * 70)
+        logger.info('FIRST RUN DETECTED')
+        logger.info('Tile information not found. Will download from CANFAR vault.')
+        logger.info('This one-time setup takes approximately 5 minutes.')
+        logger.info('=' * 70)
+
+        # Override the setting to force update
+        raw.tiles.update_tiles = True
+        logger.debug('Automatically enabled tiles.update_tiles for first run.')
 
     # Build final settings
     settings = Settings(
@@ -257,13 +280,6 @@ def load_settings(
     )
 
     logger.info(f'Configuration loaded successfully for machine: {raw.machine}')
-
-    # Check and warn if this appears to be first run
-    if is_first_run(settings.paths.tile_info_directory):
-        logger.warning(
-            'Tile information files not found. This appears to be a first run.\n'
-            'You may need to run with --update-tiles to download tile lists.'
-        )
 
     return settings
 
