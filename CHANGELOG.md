@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 
 -
 
+## [0.1.1] - 2025-10-31
+
+### Fixed
+- Corrected documented Python requirement to Python >= 3.11.
+
 ## [0.1.0] - 2025-10-30
 Initial public release of `unionsdata`. This release provides a CLI and Python package to download UNIONS imaging data in a reproducible way, using a YAML configuration, XDG user directories, and a concurrent download engine.
 

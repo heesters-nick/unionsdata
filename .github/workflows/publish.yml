@@ -3,7 +3,7 @@ name: Publish to PyPI and Create GitHub Release
 on:
   push:
     tags:
-      - 'v*' # Triggers when you push a tag like v0.1.0
+      - 'v*' # Triggers when a tag like v0.1.0 is pushed
 
 permissions:
   id-token: write # Required for Trusted Publishing to PyPI
@@ -52,8 +52,7 @@ jobs:
 
   create-github-release:
     name: Create GitHub Release
-    # This job will run AFTER the publish jobs, but only if one of them
-    # ran and succeeded.
+    # This job will only run if the publish-to-pypi job was successful
     needs: publish-to-pypi
     if: needs.publish-to-pypi.result == 'success'
     runs-on: ubuntu-latest
@@ -61,10 +60,34 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"  # Strip leading 'v' (v0.1.1 -> 0.1.1)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog entry for this tag
+        id: changelog
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          version: ${{ steps.get_version.outputs.version }}
+          path: ./CHANGELOG.md
+          validation_level: error
+
+      - name: Fail if changelog entry is missing
+        run: |
+          if [ -z "${{ steps.changelog.outputs.changes }}" ]; then
+            echo "::error::No changelog entry found for version ${{ steps.get_version.outputs.version }} in CHANGELOG.md."
+            echo "Add a section like '## [${{ steps.get_version.outputs.version }}] - YYYY-MM-DD' before tagging."
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.changes }}
