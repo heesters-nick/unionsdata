@@ -1,5 +1,6 @@
 # UNIONSdata
 
+[![PyPI version](https://img.shields.io/pypi/v/unionsdata)](https://pypi.org/project/unionsdata/)
 [![CI](https://github.com/heesters-nick/unionsdata/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/heesters-nick/unionsdata/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -362,7 +363,7 @@ unionsdata init
 ## Support
 
 For issues and questions:
-- Open an issue on GitHub
+- Open an issue on [GitHub](https://github.com/heesters-nick/unionsdata)
 - Contact: nick.heesters@epfl.ch
 
 ---
