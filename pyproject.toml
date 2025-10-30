@@ -9,7 +9,7 @@ name = "unionsdata"
 dynamic = ["version"]
 description = "Download imaging data from the UNIONS survey."
 readme = "README.md"
-requires-python = ">=3.13.1"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Nick Heesters" }]
 
@@ -71,7 +71,7 @@ addopts = [
 ]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 strict = false
 disallow_untyped_defs = true  # All functions must have type hints
 disallow_incomplete_defs = true  # All functions must have complete type hints
@@ -103,7 +103,7 @@ ignore_missing_imports = true
 # ---- Ruff configuration ----
 [tool.ruff]
 line-length = 100              # Max line length (matches your existing config)
-target-version = "py313"       # Target Python 3.13 syntax
+target-version = "py311"       # Target Python 3.11 syntax
 extend-include = ["*.ipynb"]   # Also lint/format Jupyter notebooks (your setting)
 
 # Linting rules
