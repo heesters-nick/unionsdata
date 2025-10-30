@@ -250,7 +250,7 @@ def load_settings(
     except Exception:
         is_editable = False
 
-    if is_editable or root != Path.home():
+    if is_editable:
         # Use config-specified paths (development/custom setup)
         paths = PathsResolved(
             root_dir_main=root,
