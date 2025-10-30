@@ -11,7 +11,7 @@ A Python package for downloading multi-band imaging data from the Ultraviolet Ne
 
 ✨ **Multi-threaded downloads** - Parallel downloading for improved performance\
 🎯 **Flexible input methods** - Use coordinates, tile numbers, or CSV catalogs\
-🌳 **Spatial indexing** - KD-tree for efficient tile-to-coordinate matching\
+🌳 **Spatial indexing** - KD-tree for efficient coordinate-to-tile matching\
 📊 **Progress tracking** - Real-time download status and completion reports\
 ⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
 🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup
