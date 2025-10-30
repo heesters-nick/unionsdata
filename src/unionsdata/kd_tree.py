@@ -23,6 +23,9 @@ def build_tree(tiles: list[tuple[int, int]], tile_info_dir: Path, save: bool = T
     Returns:
         None
     """
+    if not tiles:
+        raise ValueError('Cannot build tree from empty tile list')
+
     logger.debug('Building kd tree..')
     tile_coords = np.array([relate_coord_tile(nums=num) for num in tiles])
     tile_coords_c = SkyCoord(tile_coords[:, 0], tile_coords[:, 1], unit='deg', frame='icrs')
@@ -105,7 +108,8 @@ def find_tile(
     coord_c = SkyCoord(ra_deg, dec_deg, unit='deg', frame='icrs')
     coord_xyz = np.asarray(coord_c.cartesian.xyz.value, dtype=float)  # type: ignore
 
-    dists, indices = tree.query(coord_xyz, k=4)
+    k = min(4, len(tiles))
+    dists, indices = tree.query(coord_xyz, k=k)
 
     # Convert to Python scalars for clean typing
     dists_list: list[float] = [float(x) for x in np.atleast_1d(dists).tolist()]
@@ -116,7 +120,7 @@ def find_tile(
         wcs.set_coords(relate_coord_tile(nums=tiles[idx]))
         if wcs.wcs_tile.footprint_contains(coord_c):
             return tiles[idx], dist
-    raise ValueError(f'Object {object_coord} could not be assigned to a tile.')
+    raise ValueError(f'Object {object_coord[0]} {object_coord[1]} could not be assigned to a tile.')
 
 
 def relate_coord_tile(
@@ -134,13 +138,19 @@ def relate_coord_tile(
 
     Raises:
         ValueError: if neither coords nor nums are provided
+        TypeError: if coords is not a tuple of two floats
+        TypeError: if nums is not a tuple of two ints
     """
     if coords:
+        if not isinstance(coords, tuple) or len(coords) != 2:
+            raise TypeError('coords must be a tuple of (ra, dec)')
         ra, dec = coords
         xxx = ra * 2 * np.cos(np.radians(dec))
         yyy = (dec + 90) * 2
-        return int(xxx), int(yyy)
+        return np.round(xxx), np.round(yyy)
     elif nums:
+        if not isinstance(nums, tuple) or len(nums) != 2:
+            raise TypeError('nums must be a tuple of (first_tile_num, second_tile_num)')
         xxx, yyy = nums
         dec = yyy / 2 - 90
         ra = xxx / 2 / np.cos(np.radians(dec))
