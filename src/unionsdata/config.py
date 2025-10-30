@@ -198,6 +198,7 @@ class Settings(BaseModel):
 def load_settings(
     config_path: Path | None = None,
     cli_overrides: dict[str, Any] | None = None,
+    check_first_run: bool = True,
 ) -> Settings:
     """
     Load and validate configuration from YAML file.
@@ -208,6 +209,7 @@ def load_settings(
     Args:
         config_path: Path to YAML configuration file (optional)
         cli_overrides: Dictionary of CLI overrides to apply (optional)
+        check_first_run: Whether to check for first run and enable tile updates (optional)
 
     Returns:
         Validated Settings object
@@ -267,7 +269,7 @@ def load_settings(
         )
 
     # Check for first run and auto-enable update_tiles if needed
-    if is_first_run(paths.tile_info_directory):
+    if check_first_run and is_first_run(paths.tile_info_directory):
         logger.info('=' * 70)
         logger.info('FIRST RUN DETECTED')
         logger.info('Tile information not found. Will download from CANFAR vault.')

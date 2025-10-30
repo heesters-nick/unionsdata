@@ -295,7 +295,7 @@ def run_validate(args: argparse.Namespace) -> None:
     """Validate the configuration file."""
 
     try:
-        _ = load_settings(config_path=args.config)
+        _ = load_settings(config_path=args.config, check_first_run=False)
         logger.info('✓ Config is valid!')
     except Exception as e:
         logger.error(f'✗ Config validation failed: {e}')
