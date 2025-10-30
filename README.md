@@ -152,7 +152,7 @@ The package provides a `unionsdata` command with several subcommands:
 | `unionsdata edit` | Open configuration file in default editor |
 | `unionsdata validate` | Validate your configuration |
 | `unionsdata download` | Start downloading data |
-| `unionsdata` | Shortcut for `unionsdata download` |
+| `unionsdata` | Shortcut alias for `unionsdata download` |
 
 >**📝 Important - First Run:** On your first download, the package automatically detects this and downloads tile availability information from CANFAR (~5 minutes one-time setup). A KD-tree spatial index is built for efficient coordinate-to-tile matching. Subsequent runs use the cached data.
 >
