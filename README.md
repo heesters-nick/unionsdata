@@ -154,7 +154,14 @@ The package provides a `unionsdata` command with several subcommands:
 | `unionsdata download` | Start downloading data |
 | `unionsdata` | Shortcut for `unionsdata download` |
 
-
+>**📝 Important - First Run:** On your first download, the package automatically detects this and downloads tile availability information from CANFAR (~5 minutes one-time setup). A KD-tree spatial index is built for efficient coordinate-to-tile matching. Subsequent runs use the cached data.
+>
+> To refresh tile availability data later, use the `--update-tiles` flag:
+> ```bash
+> unionsdata download --update-tiles
+> ```
+>
+> Or set `update_tiles: true` in your config file.
 
 #### Download Specific Tiles
 
