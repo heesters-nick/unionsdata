@@ -1,0 +1,71 @@
+name: Publish to PyPI and Create GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers when you push a tag like v0.1.0
+
+permissions:
+  id-token: write # Required for Trusted Publishing to PyPI
+  contents: write # Required for creating the GitHub Release
+
+jobs:
+  publish-to-test-pypi:
+    name: Publish to TestPyPI
+    if: contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi_unionsdata
+      url: https://test.pypi.org/p/unionsdata
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install build tools
+        run: pip install hatch
+      - name: Build package
+        run: hatch build
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    if: success() && !(contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc'))
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi_unionsdata
+      url: https://pypi.org/p/unionsdata
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install build tools
+        run: pip install hatch
+      - name: Build package
+        run: hatch build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  create-github-release:
+    name: Create GitHub Release
+    # This job will run AFTER the publish jobs, but only if one of them
+    # ran and succeeded.
+    needs: [publish-to-pypi, publish-to-test-pypi]
+    if: success() # Only run if the 'needs' jobs were successful
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          # This automatically determines if it's a pre-release
+          # based on the tag name (e.g., v0.1.0-alpha.1)
+          prerelease: contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+
+          # This automatically generates release notes
+          # from your commit messages since the last tag.
+          # This replaces your old 'Extract release notes' step.
+          generate_release_notes: true
