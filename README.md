@@ -1,5 +1,10 @@
 # UNIONSdata
 
+[![CI](https://github.com/heesters-nick/unionsdata/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/heesters-nick/unionsdata/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](http://mypy-lang.org/)
+
 A Python package for downloading multi-band imaging data from the Ultraviolet Near Infrared Optical Northern Survey ([UNIONS](https://www.skysurvey.cc/)). The package downloads the reduced images from the CANFAR VOSpace vault using the [vos tool](https://pypi.org/project/vos/).
 
 ## Features
