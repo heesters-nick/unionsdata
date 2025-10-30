@@ -30,7 +30,7 @@ class RuntimeCfg(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
     n_download_threads: int = Field(ge=1, le=32)
-    bands: list[str]
+    bands: list[str] = Field(..., min_length=1, max_length=6)
     resume: bool = False
 
 
@@ -125,6 +125,17 @@ class RawConfig(BaseModel):
     paths_database: PathsDatabase
     paths_by_machine: dict[str, PathsByMachineEntry]
     bands: dict[str, BandCfg]
+
+    @model_validator(mode='after')
+    def validate_machine(self) -> RawConfig:
+        """Validate that machine exists in paths_by_machine."""
+        if self.machine not in self.paths_by_machine:
+            available = ', '.join(self.paths_by_machine.keys())
+            raise ValueError(
+                f'Machine "{self.machine}" not found in paths_by_machine. '
+                f'Available machines: {available}'
+            )
+        return self
 
 
 class PathsResolved(BaseModel):
