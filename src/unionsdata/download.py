@@ -62,6 +62,9 @@ def tile_band_specs(
         f'{prefix}{delimiter}{tile[0]:0>{zfill}}{delimiter}{tile[1]:0>{zfill}}{suffix}'
     )
     final_path = tile_band_dir / tile_fitsfilename
+    if fits_ext != 0:
+        # add [fits_ext] for non-primary extensions
+        final_path = Path(f'{final_path}[{fits_ext}]')
     temp_path = final_path.with_name(final_path.stem + '_temp.fits')
     vos_path = posixpath.join(vos_dir, tile_fitsfilename)
 

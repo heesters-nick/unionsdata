@@ -24,6 +24,7 @@ dependencies = [
     "concurrent-log-handler>=0.9.28",
     "pydantic>=2.0",
     "PyYAML>=6.0",
+    "h5py>=3.10.0",
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----

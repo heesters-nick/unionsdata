@@ -203,8 +203,7 @@ def load_settings(
     """
     Load and validate configuration from YAML file.
 
-    Searches for config in multiple standard locations if path not provided.
-    See find_config_file() for search order.
+    Searches for config in expected location if path not provided.
 
     Args:
         config_path: Path to YAML configuration file (optional)
@@ -218,8 +217,10 @@ def load_settings(
         ValueError: If configuration is invalid
         FileNotFoundError: If config file doesn't exist in any search location
     """
-    # Find config file (searches multiple locations)
-    config_path = find_config_file(config_path)
+    # Check if we're in editable/dev mode
+    is_editable = determine_install_mode()
+    # Get config path based on install mode
+    config_path = get_config_path(is_editable, config_path)
     logger.info(f'Loading configuration from: {config_path}')
 
     with open(config_path, encoding='utf-8') as f:
@@ -237,18 +238,6 @@ def load_settings(
     pc = raw.paths_database
 
     root = pm.root_dir_main
-
-    # Check if we're in editable/dev mode
-    try:
-        dist = distribution('unionsdata')
-        # Editable installs have .egg-link or direct_url.json
-        is_editable = (
-            any(f.name in ('direct_url.json', 'top_level.txt') for f in dist.files or [])
-            if dist.files
-            else False
-        )
-    except Exception:
-        is_editable = False
 
     if is_editable:
         # Use config-specified paths (development/custom setup)
@@ -463,65 +452,6 @@ def get_user_data_dir() -> Path:
     return base / 'unionsdata'
 
 
-def find_config_file(explicit_path: Path | None = None) -> Path:
-    """
-    Find configuration file by searching multiple locations.
-
-    Search order:
-    1. Explicit path provided by user (if given)
-    2. ./config.yaml (current directory)
-    3. ~/.config/unionsdata/config.yaml (user config)
-    4. src/unionsdata/config.yaml (ONLY in editable/development mode)
-
-    Args:
-        explicit_path: User-provided config path (highest priority)
-
-    Returns:
-        Path to config file
-
-    Raises:
-        FileNotFoundError: If no config file found in any location
-    """
-    if explicit_path is not None:
-        if explicit_path.exists():
-            return explicit_path
-        else:
-            raise FileNotFoundError(f'Specified config file not found: {explicit_path}')
-
-    # Search standard locations
-    search_paths = [
-        Path('config.yaml'),  # Current directory
-        get_user_config_dir() / 'config.yaml',  # User config
-    ]
-
-    for search_path in search_paths:
-        if search_path.exists():
-            logger.debug(f'Found config file at: {search_path}')
-            return search_path
-
-    # Check if we're in editable/development mode
-    try:
-        package_config = files('unionsdata').joinpath('config.yaml')
-        package_config_path = Path(str(package_config))
-
-        # Only use package config if it's in a 'src' directory (editable install)
-        if 'src' in package_config_path.parts and package_config_path.exists():
-            logger.debug(f'Found config in development mode: {package_config_path}')
-            return package_config_path
-    except Exception:
-        pass
-
-    # No config found anywhere
-    raise FileNotFoundError(
-        'Config file not found. Searched locations:\n'
-        + '\n'.join(f'  - {p}' for p in search_paths)
-        + '\n\nTo set up your configuration:\n'
-        + "  1. Run 'unionsdata init' to create a config file\n"
-        + "  2. Run 'unionsdata edit' to customize it with your paths\n"
-        + '  3. Or use --config /path/to/your/config.yaml'
-    )
-
-
 def is_first_run(tile_info_dir: Path) -> bool:
     """
     Check if this appears to be a first run (missing tile info files).
@@ -532,6 +462,9 @@ def is_first_run(tile_info_dir: Path) -> bool:
     Returns:
         True if tile info files are missing, False otherwise
     """
+
+    logger.debug(f'Checking for first run in tile info directory: {tile_info_dir}')
+
     if not tile_info_dir.exists():
         return True
 
@@ -543,3 +476,56 @@ def is_first_run(tile_info_dir: Path) -> bool:
         return True
 
     return False
+
+
+def determine_install_mode() -> bool:
+    """Determine if the package is installed in editable/development mode or from PyPI via pip install unionsdata."""
+    try:
+        dist = distribution('unionsdata')
+        # Editable installs have .egg-link or direct_url.json
+        is_editable = (
+            any(f.name in ('direct_url.json', 'top_level.txt') for f in dist.files or [])
+            if dist.files
+            else False
+        )
+    except Exception:
+        is_editable = False
+
+    return is_editable
+
+
+def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
+    """
+    Get the configuration file path.
+
+    Args:
+        is_editable: Whether the package is in editable/development mode
+        config_path: User-provided config path (optional)
+
+    Returns:
+        Path to config file
+    Raises:
+        FileNotFoundError: If specified config file does not exist.
+    """
+    if config_path is not None:
+        if config_path.exists():
+            return config_path
+        else:
+            raise FileNotFoundError(f'Specified config file not found: {config_path}')
+
+    if is_editable:
+        # Use config from source directory
+        config_path = Path(str(files('unionsdata').joinpath('config.yaml')))
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f'We are in editable mode. Config file not found at: {config_path}'
+            )
+    else:
+        # Use user config directory
+        config_path = get_user_config_dir() / 'config.yaml'
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f'We are in user mode. Config file not found in user config directory at: {config_path}'
+            )
+
+    return config_path

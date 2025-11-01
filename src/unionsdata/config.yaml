@@ -28,8 +28,9 @@ inputs:
   source: "tiles"                                                  # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
-    - [217, 292]
-    - [234, 295]
+    - [268, 277]
+    - [269, 277]
+    - [274, 275]
 
   # Pairs: [[ra1, dec1], [ra2, dec2], ...]
   coordinates:

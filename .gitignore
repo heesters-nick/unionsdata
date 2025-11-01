@@ -12,3 +12,4 @@ figures/
 .mypy_cache/
 .ruff_cache/
 tile_info*/
+notebooks/
