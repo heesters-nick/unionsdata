@@ -67,7 +67,7 @@ bands:
   cfis-u:
     name: "CFIS"
     band: "u"
-    vos: "vos:cfis/tiles_DR5"
+    vos: "vos:cfis/tiles_DR6"
     suffix: ".u.fits"
     delimiter: "."
     fits_ext: 0
@@ -87,7 +87,7 @@ bands:
   cfis_lsb-r:
     name: "CFIS_LSB"
     band: "r"
-    vos: "vos:cfis/tiles_LSB_DR5"
+    vos: "vos:cfis/tiles_LSB_DR6"
     suffix: ".r.fits"
     delimiter: "."
     fits_ext: 0
