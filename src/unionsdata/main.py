@@ -144,6 +144,7 @@ def run_download(args: argparse.Namespace) -> None:
     selected_tiles = [
         all_tiles[list(all_band_dict.keys()).index(band)] for band in cfg.runtime.bands
     ]
+
     availability = TileAvailability(selected_tiles, selected_band_dict)
 
     # Process input to get list of tiles to download
@@ -165,16 +166,25 @@ def run_download(args: argparse.Namespace) -> None:
         ]
         availability = TileAvailability(filtered_tiles, selected_band_dict)
 
-    # Get tiles available in the specified bands and create download jobs
-    logger.info(f'Getting tiles available in bands: {bands}')
-    tiles_to_process = availability.get_tiles_for_bands(bands)
-
-    # Create list of (tile, band) pairs for downloading
+    # Create download jobs based on require_all_bands setting
     download_jobs = []
-    for tile in tiles_to_process:
-        available_bands, _ = availability.get_availability(tile)
-        for band in available_bands:
-            if band in bands:  # Only download requested bands
+
+    if cfg.tiles.require_all_specified_bands:
+        # Get tiles available in the specified bands and create download jobs
+        logger.info(f'Requiring all specified bands: {bands}')
+        tiles_to_process = availability.get_tiles_for_bands(bands)
+        logger.info(f'Found {len(tiles_to_process)} tiles available in all requested bands')
+
+        for tile in tiles_to_process:
+            for band in bands:
+                download_jobs.append((tile, band))
+    else:
+        # Get tiles available in any of the specified bands
+        logger.info(f'Requiring any of the specified bands: {bands}')
+        for band in bands:
+            band_tiles = availability.band_tiles(band)
+            logger.info(f'  {band}: {len(band_tiles)} tiles available')
+            for tile in band_tiles:
                 download_jobs.append((tile, band))
 
     logger.info(f'Total download jobs: {len(download_jobs)}')
@@ -199,7 +209,7 @@ def run_download(args: argparse.Namespace) -> None:
             tiles_to_download=download_jobs,
             band_dictionary=selected_band_dict,
             download_dir=download_dir,
-            requested_bands=set(bands),  # Pass requested bands as a set
+            requested_bands=set(bands),
             num_threads=download_threads,
         )
     except Exception as e:

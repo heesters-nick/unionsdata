@@ -298,6 +298,7 @@ data/
 | `runtime` | `resume` | Overwrite existing log file if `false` |
 | `tiles` | `update_tiles` | Refresh tile lists from VOSpace |
 | `tiles` | `band_constraint` | Minimum bands required per tile |
+| `tiles` | `require_all_specified_bands` | Require that all requested bands are available to download a tile |
 | `inputs` | `source` | Input method: `tiles`, `coordinates`, `dataframe`, or `all_available` |
 
 ### Band Configuration

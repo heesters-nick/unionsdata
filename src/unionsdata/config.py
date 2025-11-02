@@ -41,6 +41,7 @@ class TilesCfg(BaseModel):
     update_tiles: bool = False
     show_tile_statistics: bool = True
     band_constraint: int = Field(ge=1, le=6)
+    require_all_specified_bands: bool = False
 
 
 class ColumnMap(BaseModel):

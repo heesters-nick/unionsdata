@@ -173,6 +173,7 @@ def download_worker(
     download_dir: Path,
     shutdown_flag: Event,
     requested_bands: set[str],
+    bands_with_jobs: set[str],
     tile_progress: dict[str, set[str]],
     tile_progress_lock: threading.Lock,
 ) -> None:
@@ -185,6 +186,7 @@ def download_worker(
         download_dir: Directory to download files to
         shutdown_flag: Event to signal worker shutdown
         requested_bands: Set of bands that were requested for download
+        bands_with_jobs: Set of bands that have download jobs
         tile_progress: Shared dict to track download progress per tile
         tile_progress_lock: Lock to synchronize access to tile_progress
     """
@@ -236,17 +238,22 @@ def download_worker(
 
                         # Check if tile is complete in all requested bands
                         tile_bands = tile_progress[tile_str_key].copy()  # copy for thread safety
-                        remaining_bands = requested_bands - tile_bands
+                        remaining_bands_total = requested_bands - tile_bands
+                        remaining_bands_jobs = bands_with_jobs - tile_bands
 
                     logger.info(f'Tile {tile_str_key} downloaded in band {band}')
 
-                    if not remaining_bands:
+                    if not remaining_bands_total:
                         logger.info(
                             f'✓ Tile {tile_str_key} COMPLETE in all requested bands: {sorted(tile_bands)}'
                         )
+                    elif not remaining_bands_jobs:
+                        logger.info(
+                            f'✓ Tile {tile_str_key} COMPLETE in all available bands: {sorted(tile_bands)}; missing band(s): {sorted(remaining_bands_total)}'
+                        )
                     else:
                         logger.info(
-                            f'  Tile {tile_str_key} progress: {sorted(tile_bands)}, remaining: {sorted(remaining_bands)}'
+                            f'  Tile {tile_str_key} progress: {sorted(tile_bands)}, remaining: {sorted(remaining_bands_jobs)}'
                         )
 
                 else:
@@ -321,6 +328,10 @@ def download_tiles(
         f'Starting download of {total_jobs} tile-band combinations using {num_threads} threads'
     )
 
+    bands_with_jobs = {band for _, band in tiles_to_download}
+    print(f'Bands with download jobs: {sorted(bands_with_jobs)}')
+    print(f'Requested bands: {sorted(requested_bands)}')
+
     # Start worker threads
     threads = []
     for i in range(num_threads):
@@ -332,6 +343,7 @@ def download_tiles(
                 download_dir,
                 shutdown_flag,
                 requested_bands,
+                bands_with_jobs,
                 tile_progress,
                 tile_progress_lock,
             ),

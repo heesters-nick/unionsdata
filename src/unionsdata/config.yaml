@@ -10,18 +10,19 @@
 machine: local                                                     # canfar | narval | local
 
 logging:
-  name: download_test
+  name: download_test_g_z
   level: INFO
 
 runtime:
   n_download_threads: 12
-  bands: ["whigs-g", "cfis_lsb-r", "ps-i"]                         # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["whigs-g", 'wishes-z', 'cfis-u', 'cfis_lsb-r']                                   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
 
 tiles:
   update_tiles: false                                              # set to true to update tile list from the VOS vault
   show_tile_statistics: true
   band_constraint: 1                                               # min bands for a tile to qualify for download
+  require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
 inputs:
   # Choose the input source
