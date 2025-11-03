@@ -12,9 +12,10 @@ from types import FrameType
 from typing import TypedDict
 
 import numpy as np
+import requests
 
 from unionsdata.config import BandDict
-from unionsdata.utils import tile_str
+from unionsdata.utils import decompress_fits, tile_str
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
@@ -25,6 +26,7 @@ class TileBandSpec(TypedDict):
     final_path: Path
     temp_path: Path
     vos_path: str
+    http_url: str
     fits_ext: int
     zp: float
     tile_dir: Path
@@ -64,15 +66,23 @@ def tile_band_specs(
     final_path = tile_band_dir / tile_fitsfilename
     temp_path = final_path.with_name(final_path.stem + '_temp.fits')
     vos_path = posixpath.join(vos_dir, tile_fitsfilename)
+    # get HTTP URL for size verification
+    http_url_base = vos_path.replace('vos:', 'https://ws-cadc.canfar.net/vault/files/')
+
     if fits_ext != 0:
-        # add [fits_ext] for non-primary extensions
+        # VCP path gets [fits_ext] for non-primary extensions
         vos_path = vos_path + f'[{fits_ext}]'
+        # HTTP URL for size check: use SUB parameter to request specific extension
+        http_url = http_url_base + f'?SUB=[{fits_ext}]'
+    else:
+        http_url = http_url_base
 
     return {
         'fitsfilename': tile_fitsfilename,
         'final_path': final_path,
         'temp_path': temp_path,
         'vos_path': vos_path,
+        'http_url': http_url,
         'fits_ext': fits_ext,
         'zp': zp,
         'tile_dir': tile_dir,
@@ -85,8 +95,10 @@ def download_tile_one_band(
     final_path: Path,
     temp_path: Path,
     vos_path: str,
+    http_url: str,
     band: str,
     shutdown_flag: Event,
+    cert_path: Path,
 ) -> bool:
     """
     Download a tile in a specific band.
@@ -97,15 +109,21 @@ def download_tile_one_band(
         final_path: path to file after download complete
         temp_path: path to file while download ongoing
         vos_path: path to file on server
+        http_url: HTTP URL to file on server
         band: band name
         shutdown_flag: Event to signal shutdown
+        cert_path: path to SSL certificate for verification
 
     Returns:
         success/failure
     """
     if final_path.is_file():
-        logger.info(f'File {tile_fitsname} was already downloaded for band {band}.')
-        return True
+        if verify_download(final_path, http_url, cert_path):
+            logger.info(f'File {tile_fitsname} already downloaded and verified for band {band}.')
+            return True
+        else:
+            logger.warning(f'File {tile_fitsname} exists but failed verification, re-downloading.')
+            final_path.unlink()
 
     try:
         logger.info(f'Downloading {tile_fitsname} for band {band}...')
@@ -141,6 +159,17 @@ def download_tile_one_band(
 
         # change to path mode
         temp_path.rename(final_path)
+
+        # Verify the download
+        if not verify_download(final_path, http_url, cert_path):
+            logger.error(f'Download verification failed for {tile_fitsname}')
+            cleanup_temp_file(final_path)
+            return False
+
+        if band in ['whigs-g', 'wishes-z']:
+            decompressed_path = decompress_fits(final_path)
+            logger.info(f'Decompressed file saved at {decompressed_path}')
+
         logger.info(
             f'Successfully downloaded tile {tile_str(tile_numbers)} for band {band} in {np.round(time.time() - start_time, 1)} seconds.'
         )
@@ -176,6 +205,7 @@ def download_worker(
     bands_with_jobs: set[str],
     tile_progress: dict[str, set[str]],
     tile_progress_lock: threading.Lock,
+    cert_path: Path,
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -189,6 +219,7 @@ def download_worker(
         bands_with_jobs: Set of bands that have download jobs
         tile_progress: Shared dict to track download progress per tile
         tile_progress_lock: Lock to synchronize access to tile_progress
+        cert_path: Path to SSL certificate for verification
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -222,8 +253,10 @@ def download_worker(
                     final_path=paths['final_path'],
                     temp_path=paths['temp_path'],
                     vos_path=paths['vos_path'],
+                    http_url=paths['http_url'],
                     band=band,
                     shutdown_flag=shutdown_flag,
+                    cert_path=cert_path,
                 )
 
                 if success:
@@ -284,7 +317,8 @@ def download_tiles(
     band_dictionary: dict[str, BandDict],
     download_dir: Path,
     requested_bands: set[str],
-    num_threads: int = 4,
+    num_threads: int,
+    cert_path: Path,
 ) -> tuple[int, int, int]:
     """
     Download a list of tiles using multiple worker threads.
@@ -295,6 +329,7 @@ def download_tiles(
         download_dir: Directory to download files to
         requested_bands: Set of bands that were requested
         num_threads: Number of worker threads to use
+        cert_path: Path to SSL certificate for verification
 
     Returns:
         tuple: (total_jobs, completed_jobs, failed_jobs)
@@ -346,6 +381,7 @@ def download_tiles(
                 bands_with_jobs,
                 tile_progress,
                 tile_progress_lock,
+                cert_path,
             ),
             name=f'DownloadWorker-{i}',
         )
@@ -480,3 +516,125 @@ def cleanup_temp_files(download_dir: Path) -> None:
                     logger.warning(f'Could not remove temp file {temp_file}: {e}')
     except Exception as e:
         logger.warning(f'Error during temp file cleanup: {e}')
+
+
+def get_expected_file_size(http_url: str, cert_path: Path, retries: int = 3) -> int | None:
+    """
+    Get expected file size from CANFAR server.
+
+    For multi-extension FITS files with [ext] notation, we make an actual
+    GET request with Range: bytes=0-0 to get the Content-Length of the
+    extension cutout.
+
+    Args:
+        http_url: HTTP URL to the file (may include [ext] notation)
+        cert_path: Path to CADC certificate (if available)
+        retries: Number of retries for network requests
+
+    Returns:
+        File size in bytes, or None if unavailable
+    """
+    for attempt in range(retries + 1):
+        try:
+            session = requests.Session()
+            if cert_path and cert_path.exists():
+                session.cert = (str(cert_path), str(cert_path))
+
+            # For files with [ext], use Range request to get size without downloading
+            if '[' in http_url:
+                response = session.get(
+                    http_url,
+                    headers={'Range': 'bytes=0-0'},
+                    timeout=15,  # Increased timeout
+                    stream=True,
+                )
+
+                if response.status_code == 206:  # Partial Content
+                    content_range = response.headers.get('Content-Range')
+                    if content_range:
+                        total_size = int(content_range.split('/')[-1])
+                        response.close()
+                        return total_size
+
+                elif response.status_code == 200:
+                    content_length = response.headers.get('Content-Length')
+                    response.close()
+                    if content_length:
+                        return int(content_length)
+            else:
+                # For whole files, HEAD request is sufficient
+                response = session.head(http_url, timeout=15)
+
+                if response.status_code == 200:
+                    content_length = response.headers.get('Content-Length')
+                    if content_length:
+                        return int(content_length)
+
+            # If we got here, size was not available in headers
+            if attempt < retries:
+                logger.debug(f'Size check attempt {attempt + 1} failed for {http_url}, retrying...')
+                time.sleep(0.5)  # Brief delay before retry
+            else:
+                logger.debug(
+                    f'Could not determine file size after {retries + 1} attempts: {http_url}'
+                )
+
+        except requests.exceptions.Timeout:
+            if attempt < retries:
+                logger.debug(f'Timeout on attempt {attempt + 1} for {http_url}, retrying...')
+                time.sleep(1)  # Longer delay on timeout
+            else:
+                logger.debug(f'Timeout getting file size after {retries + 1} attempts: {http_url}')
+        except requests.exceptions.SSLError as e:
+            # SSL errors are likely permanent, don't retry
+            logger.debug(f'SSL error for {http_url}: {e}')
+            break
+        except Exception as e:
+            if attempt < retries:
+                logger.debug(f'Error on attempt {attempt + 1} for {http_url}: {e}, retrying...')
+                time.sleep(0.5)
+            else:
+                logger.debug(
+                    f'Error getting file size after {retries + 1} attempts: {http_url}: {e}'
+                )
+
+    return None
+
+
+def verify_download(
+    file_path: Path,
+    http_url: str,
+    cert_path: Path,
+) -> bool:
+    """
+    Verify that downloaded file matches expected size from server.
+
+    Args:
+        file_path: Path to downloaded file
+        http_url: HTTP URL to check expected size
+        cert_path: Path to CADC certificate
+
+    Returns:
+        True if file size matches or size check unavailable, False if mismatch
+    """
+    if not file_path.exists():
+        logger.warning(f'File does not exist: {file_path}')
+        return False
+
+    actual_size = file_path.stat().st_size
+    expected_size = get_expected_file_size(http_url, cert_path)
+
+    if expected_size is None:
+        logger.warning(f'Could not verify size for {file_path.name} (server check unavailable)')
+        return True
+
+    if actual_size == expected_size:
+        logger.info(f'✓ Size verified for {file_path.name}: {actual_size:,} bytes')
+        return True
+    else:
+        logger.warning(
+            f'✗ Size mismatch for {file_path.name}: '
+            f'expected {expected_size:,} bytes, got {actual_size:,} bytes '
+            f'({actual_size / expected_size * 100:.1f}% complete)'
+        )
+        return False

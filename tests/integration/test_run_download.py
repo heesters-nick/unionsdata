@@ -34,7 +34,15 @@ def mock_setup_logger(mocker):
 
 
 @pytest.fixture
-def test_config(tmp_path: Path) -> Path:
+def mock_cert_file(tmp_path: Path) -> Path:
+    """Create a mock certificate file."""
+    cert_file = tmp_path / 'cadcproxy.pem'
+    cert_file.write_text('mock certificate')
+    return cert_file
+
+
+@pytest.fixture
+def test_config(tmp_path: Path, mock_cert_file: Path) -> Path:
     """Create a minimal test config file."""
     config_content = f"""
 machine: local
@@ -52,6 +60,7 @@ tiles:
   update_tiles: false
   show_tile_statistics: false
   band_constraint: 1
+  require_all_specified_bands: false
 
 inputs:
   source: "tiles"
@@ -74,6 +83,7 @@ paths_by_machine:
   local:
     root_dir_main: "{tmp_path}"
     root_dir_data: "{tmp_path / 'data'}"
+    cert_path: "{mock_cert_file}"
 
 bands:
   whigs-g:
@@ -109,6 +119,14 @@ bands:
     config_file = tmp_path / 'config.yaml'
     config_file.write_text(config_content)
     return config_file
+
+
+@pytest.fixture
+def mock_config_loading(mocker, test_config: Path):
+    """Mock config loading functions for all integration tests."""
+    mocker.patch('unionsdata.config.determine_install_mode', return_value=True)
+    mocker.patch('unionsdata.config.get_config_path', return_value=test_config)
+    mocker.patch('unionsdata.config.is_first_run', return_value=False)
 
 
 @pytest.fixture
@@ -149,6 +167,7 @@ def test_run_download_integration_basic(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test basic run_download workflow with tiles input."""
@@ -199,6 +218,7 @@ def test_run_download_integration_cli_override_bands(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band override from CLI."""
@@ -226,6 +246,7 @@ def test_run_download_integration_cli_override_tiles(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with tile override from CLI."""
@@ -253,6 +274,7 @@ def test_run_download_integration_coordinates(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with coordinates input."""
@@ -282,6 +304,7 @@ def test_run_download_integration_no_tiles_to_download(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download when no tiles match the criteria."""
@@ -310,6 +333,8 @@ def test_run_download_integration_resume_mode(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
+    mocker,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with resume mode enabled."""
@@ -323,7 +348,18 @@ def test_run_download_integration_resume_mode(
     data_dir = tmp_path / 'data'
     tile_dir = data_dir / '217_292' / 'whigs-g'
     tile_dir.mkdir(parents=True, exist_ok=True)
-    (tile_dir / 'calexp-CFIS_217_292.fits').write_text('existing file')
+    existing_file = tile_dir / 'calexp-CFIS_217_292.fits'
+
+    # Mock verify_download to return True for the existing file
+    def mock_verify(file_path, http_url, cert_path):
+        if file_path == existing_file:
+            return True
+        return False
+
+    mocker.patch('unionsdata.download.verify_download', side_effect=mock_verify)
+
+    # Create a realistic-sized file (not just text)
+    existing_file.write_bytes(b'0' * 1000000)  # 1MB file
 
     args = argparse.Namespace(
         config=test_config,
@@ -339,7 +375,8 @@ def test_run_download_integration_resume_mode(
         run_download(args)
 
     # Assert - Should skip the existing file
-    assert 'File calexp-CFIS_217_292.fits was already downloaded' in caplog.text
+    assert 'already downloaded and verified' in caplog.text
+    # Should download the remaining 5 files (2 tiles × 3 bands - 1 existing)
     assert mock_vcp.call_count == 5
 
 
@@ -349,6 +386,7 @@ def test_run_download_integration_band_constraint(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band_constraint filtering."""
@@ -380,6 +418,7 @@ def test_run_download_integration_error_handling(
     test_config: Path,
     setup_tile_info: None,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     mocker,
     caplog: LogCaptureFixture,
 ) -> None:
@@ -416,6 +455,7 @@ def test_run_download_integration_timing(
     setup_tile_info: None,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
+    mock_config_loading: None,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test that run_download reports timing information."""

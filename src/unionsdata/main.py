@@ -211,6 +211,7 @@ def run_download(args: argparse.Namespace) -> None:
             download_dir=download_dir,
             requested_bands=set(bands),
             num_threads=download_threads,
+            cert_path=cfg.paths.cert_path,
         )
     except Exception as e:
         logger.error(f'Error during download: {e}')

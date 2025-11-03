@@ -85,6 +85,7 @@ class PathsByMachineEntry(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
+    cert_path: Path
 
 
 class BandCfg(BaseModel):
@@ -145,6 +146,7 @@ class PathsResolved(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
+    cert_path: Path
     tile_info_directory: Path
     log_directory: Path
 
@@ -189,6 +191,9 @@ class Settings(BaseModel):
         if self.inputs.source == 'coordinates':
             if not self.inputs.coordinates:
                 logger.warning('inputs.source is "coordinates" but no coordinates specified')
+
+        if not self.paths.cert_path.exists():
+            raise ValueError(f'Certificate file does not exist: {self.paths.cert_path}')
 
         return self
 
@@ -245,6 +250,7 @@ def load_settings(
         paths = PathsResolved(
             root_dir_main=root,
             root_dir_data=pm.root_dir_data,
+            cert_path=pm.cert_path,
             tile_info_directory=root / pc.tile_info_dirname,
             log_directory=root / pc.logs_dirname,
         )
@@ -254,6 +260,7 @@ def load_settings(
         paths = PathsResolved(
             root_dir_main=data_base,
             root_dir_data=pm.root_dir_data,
+            cert_path=pm.cert_path,
             tile_info_directory=data_base / pc.tile_info_dirname,
             log_directory=data_base / pc.logs_dirname,
         )
