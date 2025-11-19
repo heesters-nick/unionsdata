@@ -16,6 +16,7 @@ import requests
 
 from unionsdata.config import BandDict
 from unionsdata.utils import decompress_fits, tile_str
+from unionsdata.verification import get_file_size, verify_download
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
@@ -67,15 +68,11 @@ def tile_band_specs(
     temp_path = final_path.with_name(final_path.stem + '_temp.fits')
     vos_path = posixpath.join(vos_dir, tile_fitsfilename)
     # get HTTP URL for size verification
-    http_url_base = vos_path.replace('vos:', 'https://ws-cadc.canfar.net/vault/files/')
+    http_url = vos_path.replace('vos:', 'https://ws-cadc.canfar.net/vault/files/')
 
     if fits_ext != 0:
         # VCP path gets [fits_ext] for non-primary extensions
         vos_path = vos_path + f'[{fits_ext}]'
-        # HTTP URL for size check: use SUB parameter to request specific extension
-        http_url = http_url_base + f'?SUB=[{fits_ext}]'
-    else:
-        http_url = http_url_base
 
     return {
         'fitsfilename': tile_fitsfilename,
@@ -117,8 +114,23 @@ def download_tile_one_band(
     Returns:
         success/failure
     """
+    session = None
+    expected_file_size = None
+    try:
+        session = make_session(cert_path)
+        header_content = fetch_fits_header(url=http_url, session=session)
+        if header_content is not None:
+            expected_file_size = get_file_size(header_content)
+        else:
+            logger.warning(f'Could not fetch header for download verification: {http_url}')
+    except Exception as e:
+        logger.warning(f'Error fetching header for download verification: {e}')
+    finally:
+        if session is not None:
+            session.close()
+
     if final_path.is_file():
-        if verify_download(final_path, http_url, cert_path):
+        if verify_download(final_path, expected_file_size):
             logger.info(f'File {tile_fitsname} already downloaded and verified for band {band}.')
             return True
         else:
@@ -160,15 +172,15 @@ def download_tile_one_band(
         # change to path mode
         temp_path.rename(final_path)
 
+        # Decompress for specific bands
+        if band in ['whigs-g', 'wishes-z']:
+            decompress_fits(final_path)
+
         # Verify the download
-        if not verify_download(final_path, http_url, cert_path):
+        if not verify_download(final_path, expected_file_size):
             logger.error(f'Download verification failed for {tile_fitsname}')
             cleanup_temp_file(final_path)
             return False
-
-        if band in ['whigs-g', 'wishes-z']:
-            decompressed_path = decompress_fits(final_path)
-            logger.info(f'Decompressed file saved at {decompressed_path}')
 
         logger.info(
             f'Successfully downloaded tile {tile_str(tile_numbers)} for band {band} in {np.round(time.time() - start_time, 1)} seconds.'
@@ -274,7 +286,7 @@ def download_worker(
                         remaining_bands_total = requested_bands - tile_bands
                         remaining_bands_jobs = bands_with_jobs - tile_bands
 
-                    logger.info(f'Tile {tile_str_key} downloaded in band {band}')
+                    logger.debug(f'Tile {tile_str_key} downloaded in band {band}')
 
                     if not remaining_bands_total:
                         logger.info(
@@ -364,8 +376,8 @@ def download_tiles(
     )
 
     bands_with_jobs = {band for _, band in tiles_to_download}
-    print(f'Bands with download jobs: {sorted(bands_with_jobs)}')
-    print(f'Requested bands: {sorted(requested_bands)}')
+    logger.info(f'Bands with download jobs: {sorted(bands_with_jobs)}')
+    logger.info(f'Requested bands: {sorted(requested_bands)}')
 
     # Start worker threads
     threads = []
@@ -518,123 +530,44 @@ def cleanup_temp_files(download_dir: Path) -> None:
         logger.warning(f'Error during temp file cleanup: {e}')
 
 
-def get_expected_file_size(http_url: str, cert_path: Path, retries: int = 3) -> int | None:
-    """
-    Get expected file size from CANFAR server.
+def make_session(cert_path: Path) -> requests.Session:
+    """Create a requests session with CADC certificate authentication."""
+    if not cert_path.exists():
+        raise FileNotFoundError(
+            f'CADC certificate file not found: {cert_path}. '
+            f'Generate it using cadc-get-cert -u YOUR_CANFAR_USERNAME'
+        )
+    session = requests.Session()
+    session.cert = (str(cert_path), str(cert_path))
+    return session
 
-    For multi-extension FITS files with [ext] notation, we make an actual
-    GET request with Range: bytes=0-0 to get the Content-Length of the
-    extension cutout.
+
+def fetch_fits_header(
+    url: str, session: requests.Session, retries: int = 3, timeout: int = 10
+) -> str | None:
+    """
+    Fetch FITS header from a file URL with retry logic.
 
     Args:
-        http_url: HTTP URL to the file (may include [ext] notation)
-        cert_path: Path to CADC certificate (if available)
-        retries: Number of retries for network requests
+        url: Base FITS file URL (without ?META=true)
+        session: Pre-configured requests.Session with authentication
+        retries: Number of retry attempts on failure
+        timeout: Request timeout in seconds
 
     Returns:
-        File size in bytes, or None if unavailable
+        FITS header content as string, or None if fetch fails
     """
+    header_url = url + '?META=true'
+
     for attempt in range(retries + 1):
         try:
-            session = requests.Session()
-            if cert_path and cert_path.exists():
-                session.cert = (str(cert_path), str(cert_path))
-
-            # For files with [ext], use Range request to get size without downloading
-            if '[' in http_url:
-                response = session.get(
-                    http_url,
-                    headers={'Range': 'bytes=0-0'},
-                    timeout=15,  # Increased timeout
-                    stream=True,
-                )
-
-                if response.status_code == 206:  # Partial Content
-                    content_range = response.headers.get('Content-Range')
-                    if content_range:
-                        total_size = int(content_range.split('/')[-1])
-                        response.close()
-                        return total_size
-
-                elif response.status_code == 200:
-                    content_length = response.headers.get('Content-Length')
-                    response.close()
-                    if content_length:
-                        return int(content_length)
-            else:
-                # For whole files, HEAD request is sufficient
-                response = session.head(http_url, timeout=15)
-
-                if response.status_code == 200:
-                    content_length = response.headers.get('Content-Length')
-                    if content_length:
-                        return int(content_length)
-
-            # If we got here, size was not available in headers
+            response = session.get(header_url, timeout=timeout)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as e:
+            logger.warning(f'Attempt {attempt + 1}/{retries + 1} failed for {url}: {e}')
             if attempt < retries:
-                logger.debug(f'Size check attempt {attempt + 1} failed for {http_url}, retrying...')
-                time.sleep(0.5)  # Brief delay before retry
-            else:
-                logger.debug(
-                    f'Could not determine file size after {retries + 1} attempts: {http_url}'
-                )
+                time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s
 
-        except requests.exceptions.Timeout:
-            if attempt < retries:
-                logger.debug(f'Timeout on attempt {attempt + 1} for {http_url}, retrying...')
-                time.sleep(1)  # Longer delay on timeout
-            else:
-                logger.debug(f'Timeout getting file size after {retries + 1} attempts: {http_url}')
-        except requests.exceptions.SSLError as e:
-            # SSL errors are likely permanent, don't retry
-            logger.debug(f'SSL error for {http_url}: {e}')
-            break
-        except Exception as e:
-            if attempt < retries:
-                logger.debug(f'Error on attempt {attempt + 1} for {http_url}: {e}, retrying...')
-                time.sleep(0.5)
-            else:
-                logger.debug(
-                    f'Error getting file size after {retries + 1} attempts: {http_url}: {e}'
-                )
-
+    logger.error(f'Failed to fetch header after {retries + 1} attempts: {url}')
     return None
-
-
-def verify_download(
-    file_path: Path,
-    http_url: str,
-    cert_path: Path,
-) -> bool:
-    """
-    Verify that downloaded file matches expected size from server.
-
-    Args:
-        file_path: Path to downloaded file
-        http_url: HTTP URL to check expected size
-        cert_path: Path to CADC certificate
-
-    Returns:
-        True if file size matches or size check unavailable, False if mismatch
-    """
-    if not file_path.exists():
-        logger.warning(f'File does not exist: {file_path}')
-        return False
-
-    actual_size = file_path.stat().st_size
-    expected_size = get_expected_file_size(http_url, cert_path)
-
-    if expected_size is None:
-        logger.warning(f'Could not verify size for {file_path.name} (server check unavailable)')
-        return True
-
-    if actual_size == expected_size:
-        logger.info(f'✓ Size verified for {file_path.name}: {actual_size:,} bytes')
-        return True
-    else:
-        logger.warning(
-            f'✗ Size mismatch for {file_path.name}: '
-            f'expected {expected_size:,} bytes, got {actual_size:,} bytes '
-            f'({actual_size / expected_size * 100:.1f}% complete)'
-        )
-        return False

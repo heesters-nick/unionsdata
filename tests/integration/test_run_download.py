@@ -42,6 +42,37 @@ def mock_cert_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def mock_session(mocker):
+    """Mock requests session creation."""
+    mock_session_obj = mocker.MagicMock()
+    return mocker.patch('unionsdata.download.make_session', return_value=mock_session_obj)
+
+
+@pytest.fixture
+def mock_verify_download(mocker):
+    """Mock download verification to always succeed."""
+    return mocker.patch('unionsdata.download.verify_download', return_value=True)
+
+
+@pytest.fixture
+def mock_header_fetch(mocker):
+    """Mock FITS header fetching and size calculation."""
+    # Mock fetch_fits_header to return a minimal valid header
+    mock_header = """SIMPLE  =                    T / conforms to FITS standard
+BITPIX  =                  -32 / array data type
+NAXIS   =                    2 / number of array dimensions
+NAXIS1  =                 2048
+NAXIS2  =                 2048
+END"""
+    mocker.patch('unionsdata.download.fetch_fits_header', return_value=mock_header)
+
+    # Mock get_file_size to return a plausible size
+    mocker.patch('unionsdata.download.get_file_size', return_value=16_777_216)  # 16 MB
+
+    return mocker
+
+
+@pytest.fixture
 def test_config(tmp_path: Path, mock_cert_file: Path) -> Path:
     """Create a minimal test config file."""
     config_content = f"""
@@ -168,6 +199,9 @@ def test_run_download_integration_basic(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test basic run_download workflow with tiles input."""
@@ -219,6 +253,9 @@ def test_run_download_integration_cli_override_bands(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band override from CLI."""
@@ -247,6 +284,9 @@ def test_run_download_integration_cli_override_tiles(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with tile override from CLI."""
@@ -275,6 +315,9 @@ def test_run_download_integration_coordinates(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with coordinates input."""
@@ -305,6 +348,9 @@ def test_run_download_integration_no_tiles_to_download(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download when no tiles match the criteria."""
@@ -334,6 +380,8 @@ def test_run_download_integration_resume_mode(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_session: MagicMock,
     mocker,
     caplog: LogCaptureFixture,
 ) -> None:
@@ -350,11 +398,10 @@ def test_run_download_integration_resume_mode(
     tile_dir.mkdir(parents=True, exist_ok=True)
     existing_file = tile_dir / 'calexp-CFIS_217_292.fits'
 
-    # Mock verify_download to return True for the existing file
-    def mock_verify(file_path, http_url, cert_path):
-        if file_path == existing_file:
-            return True
-        return False
+    # Mock verify_download with updated signature (file_path, expected_size)
+    def mock_verify(file_path: Path, expected_size: int | None) -> bool:
+        # Return True only for the pre-existing file AND it must exist
+        return file_path == existing_file and file_path.exists()
 
     mocker.patch('unionsdata.download.verify_download', side_effect=mock_verify)
 
@@ -387,6 +434,9 @@ def test_run_download_integration_band_constraint(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band_constraint filtering."""
@@ -419,6 +469,9 @@ def test_run_download_integration_error_handling(
     setup_tile_info: None,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     mocker,
     caplog: LogCaptureFixture,
 ) -> None:
@@ -456,6 +509,9 @@ def test_run_download_integration_timing(
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test that run_download reports timing information."""

@@ -553,21 +553,18 @@ def tile_str(tile: tuple[int, int]) -> str:
     return f'({tile[0]}, {tile[1]})'
 
 
-def decompress_fits(in_path: Path) -> Path:
+def decompress_fits(in_path: Path) -> None:
     """
     Decompress a tile-compressed FITS using funpack.
     """
 
-    out_path = in_path.with_suffix('.decompressed.fits')
-
     try:
         subprocess.run(
-            ['funpack', '-O', str(out_path), str(in_path)],
+            ['funpack', '-F', str(in_path)],
             check=True,
             capture_output=True,
             text=True,
         )
+        logger.debug(f'Decompressed {in_path.name}')
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f'funpack failed for {in_path}: {e.stderr.strip()}') from e
-
-    return out_path
