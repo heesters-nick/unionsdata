@@ -636,7 +636,7 @@ def split_by_tile(catalog: pd.DataFrame, tiles: list[str]) -> dict[str, pd.DataF
 def read_h5(
     file_path: Path,
     needed_datasets: list[str] | None = None,
-) -> dict[str, NDArray]:
+) -> dict[str, NDArray[np.float32]]:
     """Reads cutout data from HDF5 file with optimized dataset selection.
 
     Args:
