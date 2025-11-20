@@ -10,12 +10,13 @@
 machine: local                                                     # canfar | narval | local
 
 logging:
-  name: download_test_g_z
+  name: download_test_cutouts
   level: INFO
 
 runtime:
   n_download_threads: 12
-  bands: ["whigs-g", 'wishes-z', 'cfis-u', 'cfis_lsb-r']                                   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  n_cutout_processes: 2
+  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                                   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
 
 tiles:
@@ -24,9 +25,16 @@ tiles:
   band_constraint: 1                                               # min bands for a tile to qualify for download
   require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
+cutouts:
+  enable: true                                                     # create cutouts
+  cutouts_only: false                                              # if true, only download cutouts, not full tiles
+  size_pix: 256                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
+  output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
+
+
 inputs:
   # Choose the input source
-  source: "tiles"                                                  # all_available | tiles | coordinates | dataframe
+  source: "dataframe"                                                  # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]

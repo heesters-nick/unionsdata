@@ -10,6 +10,8 @@ from typing import cast
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
+from astropy.io.fits import Header, ImageHDU, PrimaryHDU
 from astropy.wcs.utils import skycoord_to_pixel
 from numpy.typing import NDArray
 from vos import Client
@@ -177,6 +179,7 @@ class TileAvailability:
 
 def tile_finder(
     avail: TileAvailability,
+    all_unique_tiles: list[tuple[int, int]],
     catalog: pd.DataFrame | None,
     coord_c: SkyCoord | None,
     tile_info_dir: Path,
@@ -187,6 +190,7 @@ def tile_finder(
 
     Args:
         avail: object to retrieve available tiles
+        all_unique_tiles: list of all unique tiles available
         catalog: object catalog
         coord_c: astropy SkyCoord object of the coordinates
         tile_info_dir: tile information directory
@@ -204,7 +208,8 @@ def tile_finder(
     assert coord_c is not None
     assert catalog is not None
 
-    available_tiles = avail.unique_tiles
+    # available_tiles = avail.unique_tiles
+
     tiles_matching_catalog = np.empty(len(catalog), dtype=object)
     pix_coords = np.empty((len(catalog), 2), dtype=np.float64)
     bands = np.empty(len(catalog), dtype=object)
@@ -212,7 +217,7 @@ def tile_finder(
     for i, obj_coord in enumerate(coord_c):
         assert obj_coord is not None
         tile_numbers, _ = query_tree(
-            available_tiles,
+            all_unique_tiles,
             np.array([obj_coord.ra.deg, obj_coord.dec.deg]),
             tile_info_dir,
         )
@@ -221,6 +226,10 @@ def tile_finder(
         bands_tile, band_idx_tile = avail.get_availability(tile_numbers)
         bands[i], n_bands[i] = bands_tile, len(band_idx_tile)
         if len(bands_tile) == 0:
+            logger.warning(
+                f'Object at ({obj_coord.ra.deg:.4f}, {obj_coord.dec.deg:.4f}) '
+                f'is in tile {tile_numbers} which has no requested bands'
+            )
             bands[i] = np.nan
             pix_coords[i] = np.nan, np.nan
             continue
@@ -230,7 +239,7 @@ def tile_finder(
         pix_coords[i] = pix_coord
 
     # add tile numbers and pixel coordinates to catalog
-    catalog['tile'] = tiles_matching_catalog
+    catalog['tile'] = [tile_str(tile) for tile in tiles_matching_catalog]
     catalog['x'] = pix_coords[:, 0]
     catalog['y'] = pix_coords[:, 1]
     catalog['bands'] = bands
@@ -445,15 +454,15 @@ def import_dataframe(
     logger.info('Dataframe read from config file.')
     catalog = pd.read_csv(dataframe_path)
 
-    if (
-        ra_key not in catalog.columns
-        or dec_key not in catalog.columns
-        or id_key not in catalog.columns
-    ):
+    # Add ID column if not present
+    if id_key not in catalog.columns:
+        catalog[id_key] = pd.RangeIndex(start=1, stop=len(catalog) + 1, step=1)
+
+    if ra_key not in catalog.columns or dec_key not in catalog.columns:
         logger.error(
             'One or more keys not found in the DataFrame. Please provide the correct keys '
-            'for right ascention, declination and object ID \n'
-            'if they are not equal to the default keys: ra, dec, ID.'
+            'for right ascention and declination \n'
+            'if they are not equal to the default keys: ra, dec.'
         )
         return pd.DataFrame(), None
 
@@ -491,6 +500,7 @@ def import_tiles(
 
 def input_to_tile_list(
     availability: TileAvailability,
+    all_unique_tiles: list[tuple[int, int]],
     band_constr: int,
     inputs: InputsCfg,
     tile_info_dir: Path,
@@ -503,6 +513,7 @@ def input_to_tile_list(
 
     Args:
         availability: instance of the TileAvailability class
+        all_unique_tiles: list of all unique tiles available
         band_constr: minimum number of bands that should be available
         inputs: input dictionary with coordinates, a dataframe, or tiles
         tile_info_dir: path to tile information.
@@ -543,14 +554,14 @@ def input_to_tile_list(
         return None, None, pd.DataFrame()
 
     unique_tiles, tiles_x_bands, catalog = tile_finder(
-        availability, catalog, coord_c, tile_info_dir, band_constr
+        availability, all_unique_tiles, catalog, coord_c, tile_info_dir, band_constr
     )
 
     return unique_tiles, tiles_x_bands, catalog
 
 
 def tile_str(tile: tuple[int, int]) -> str:
-    return f'({tile[0]}, {tile[1]})'
+    return f'{tile[0]:03d}_{tile[1]:03d}'
 
 
 def decompress_fits(in_path: Path) -> None:
@@ -568,3 +579,54 @@ def decompress_fits(in_path: Path) -> None:
         logger.debug(f'Decompressed {in_path.name}')
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f'funpack failed for {in_path}: {e.stderr.strip()}') from e
+
+
+def open_fits(file_path: Path, fits_ext: int) -> tuple[NDArray[np.float32], Header]:
+    """
+    Open fits file and return data and header.
+    Args:
+        file_path: name of the fits file
+        fits_ext: extension of the fits file
+    Returns:
+        data: image data
+        header: header of the fits file
+    """
+    logger.debug(f'Opening fits file {file_path.name}..')
+    start_opening = time.time()
+
+    with fits.open(file_path, memmap=True) as hdul:
+        if fits_ext > len(hdul) - 1:
+            fits_ext = 0
+
+        # Type assertion - tell the type checker this is an ImageHDU or PrimaryHDU
+        hdu = cast(ImageHDU | PrimaryHDU, hdul[fits_ext])
+
+        if hdu.data is None:
+            raise ValueError(f'HDU extension {fits_ext} contains no data')
+
+        data = hdu.data.astype(np.float32)
+        header = hdu.header
+
+    logger.debug(f'Fits file {file_path.name} opened in {time.time() - start_opening:.2f} seconds.')
+    return data, header
+
+
+def split_by_tile(catalog: pd.DataFrame, tiles: list[str]) -> dict[str, pd.DataFrame]:
+    """
+    Split catalog by tile numbers.
+
+    Args:
+        catalog: input catalog with a 'tile' column
+        tiles: list of tile numbers as strings
+
+    Returns:
+        Dictionary mapping tile numbers to DataFrames containing entries for that tile
+    """
+    if catalog.empty:
+        return {}
+    tile_catalogs: dict[str, pd.DataFrame] = {}
+    for tile in tiles:
+        tile_catalog = catalog[catalog['tile'] == tile].reset_index(drop=True)
+        if len(tile_catalog) > 0:
+            tile_catalogs[tile] = tile_catalog
+    return tile_catalogs

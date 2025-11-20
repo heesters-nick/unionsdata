@@ -30,6 +30,7 @@ class RuntimeCfg(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
     n_download_threads: int = Field(ge=1, le=32)
+    n_cutout_processes: int = Field(ge=1, le=32)
     bands: list[str] = Field(..., min_length=1, max_length=6)
     resume: bool = False
 
@@ -42,6 +43,16 @@ class TilesCfg(BaseModel):
     show_tile_statistics: bool = True
     band_constraint: int = Field(ge=1, le=6)
     require_all_specified_bands: bool = False
+
+
+class CutoutsCfg(BaseModel):
+    """Cutouts configuration."""
+
+    model_config = ConfigDict(extra='forbid')
+    enable: bool = True
+    cutouts_only: bool = False
+    size_pix: int = Field(ge=1)
+    output_subdir: str
 
 
 class ColumnMap(BaseModel):
@@ -123,6 +134,7 @@ class RawConfig(BaseModel):
     logging: LoggingCfg
     runtime: RuntimeCfg
     tiles: TilesCfg
+    cutouts: CutoutsCfg
     inputs: InputsCfg
     paths_database: PathsDatabase
     paths_by_machine: dict[str, PathsByMachineEntry]
@@ -159,6 +171,7 @@ class Settings(BaseModel):
     logging: LoggingCfg
     runtime: RuntimeCfg
     tiles: TilesCfg
+    cutouts: CutoutsCfg
     inputs: InputsCfg
     bands: dict[str, BandCfg]
     paths: PathsResolved
@@ -283,6 +296,7 @@ def load_settings(
         logging=raw.logging,
         runtime=raw.runtime,
         tiles=raw.tiles,
+        cutouts=raw.cutouts,
         inputs=raw.inputs,
         bands=raw.bands,
         paths=paths,
@@ -342,6 +356,10 @@ def _apply_cli_overrides(yaml_data: dict[str, Any], overrides: dict[str, Any]) -
     if 'all_tiles' in overrides and overrides['all_tiles']:
         yaml_data['inputs']['source'] = 'all_available'
         logger.debug('CLI override: inputs.source = all_available')
+
+    if 'cutouts' in overrides and overrides['cutouts'] is not None:
+        yaml_data['cutouts']['enable'] = overrides['cutouts']
+        logger.debug(f'CLI override: cutouts.enable = {overrides["cutouts"]}')
 
     return yaml_data
 

@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - `require_all_specified_bands` flag in config.yaml to specify if all specified bands need to be available for a tile to download it.
 - download verification by checking if downloaded files have the expected size
 - decompress compressed g-band and z-band files to speed up subsequent file loading times
+- post-download cutout creation, store in hdf5 files
 
 ## [0.1.1] - 2025-10-31
 

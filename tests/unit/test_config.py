@@ -20,18 +20,28 @@ def test_config(tmp_path: Path, mock_cert_file: Path) -> Path:
     """Create a minimal test config file."""
     config_content = f"""
 machine: local
+
 logging:
   name: test
   level: INFO
+
 runtime:
   n_download_threads: 4
+  n_cutout_processes: 2
   bands: ["whigs-g", "cfis_lsb-r"]
   resume: false
+
 tiles:
   update_tiles: false
   show_tile_statistics: true
   band_constraint: 1
   require_all_specified_bands: false
+
+cutouts:
+    enable: true
+    cutouts_only: false
+    size_pix: 256
+    output_subdir: "cutouts"
 
 inputs:
   source: "tiles"

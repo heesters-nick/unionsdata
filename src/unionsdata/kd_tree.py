@@ -51,6 +51,7 @@ def query_tree(
         tile name and distance object - nearest tile center
     """
     loaded_tree = joblib.load(tile_info_dir / 'kdtree_xyz.joblib')
+    logger.debug(f'Loaded kd tree from {tile_info_dir / "kdtree_xyz.joblib"}')
     try:
         tile_name, dist = find_tile(loaded_tree, tiles, coords)
         return tile_name, dist
@@ -120,7 +121,7 @@ def find_tile(
         wcs.set_coords(relate_coord_tile(nums=tiles[idx]))
         if wcs.wcs_tile.footprint_contains(coord_c):
             return tiles[idx], dist
-    raise ValueError(f'Object {object_coord[0]} {object_coord[1]} could not be assigned to a tile.')
+    raise ValueError(f'Object {ra_deg} {dec_deg} could not be assigned to a tile.')
 
 
 def relate_coord_tile(

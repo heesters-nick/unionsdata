@@ -76,6 +76,9 @@ def build_cli_overrides(args: argparse.Namespace) -> dict[str, object]:
     elif hasattr(args, 'all_tiles') and args.all_tiles:
         overrides['all_tiles'] = True
 
+    if hasattr(args, 'cutouts') and args.cutouts:
+        overrides['cutouts'] = True
+
     return overrides
 
 
@@ -133,12 +136,14 @@ def run_download(args: argparse.Namespace) -> None:
 
     # Query availability of tiles
     logger.info('Querying tile availability...')
-    _, all_tiles = query_availability(
+    availability_all, all_tiles = query_availability(
         update=cfg.tiles.update_tiles,
         in_dict=all_band_dict,
         show_stats=cfg.tiles.show_tile_statistics,
         tile_info_dir=tile_info_dir,
     )
+
+    all_unique_tiles = availability_all.unique_tiles
 
     # Filter tiles to only those in selected bands
     selected_tiles = [
@@ -150,8 +155,9 @@ def run_download(args: argparse.Namespace) -> None:
     # Process input to get list of tiles to download
     logger.info('Processing input to determine tiles to download...')
     # get the list of tiles
-    _, tiles_x_bands, _ = input_to_tile_list(
+    _, tiles_x_bands, catalog = input_to_tile_list(
         availability,
+        all_unique_tiles,
         cfg.tiles.band_constraint,
         cfg.inputs,
         tile_info_dir,
@@ -211,7 +217,10 @@ def run_download(args: argparse.Namespace) -> None:
             download_dir=download_dir,
             requested_bands=set(bands),
             num_threads=download_threads,
+            num_cutout_workers=cfg.runtime.n_cutout_processes,
             cert_path=cfg.paths.cert_path,
+            catalog=catalog,
+            cutouts=cfg.cutouts,
         )
     except Exception as e:
         logger.error(f'Error during download: {e}')
@@ -398,6 +407,13 @@ def cli_entry() -> None:
         action='store_true',
         help='Update the local tile availability information before downloading',
     )
+
+    parser_download.add_argument(
+        '--cutouts',
+        action='store_true',
+        help='Enable cutout creation (overrides config file)',
+    )
+
     parser_download.set_defaults(func=run_download)
 
     # --- Determine known subcommands and global flags ---
