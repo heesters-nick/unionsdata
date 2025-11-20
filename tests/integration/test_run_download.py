@@ -14,16 +14,41 @@ from scipy.spatial import cKDTree
 from unionsdata.kd_tree import relate_coord_tile
 from unionsdata.main import run_download
 
+# @pytest.fixture
+# def mock_vcp(mocker):
+#     """Mock the vcp subprocess to prevent actual downloads."""
+#     mock_popen = mocker.patch('unionsdata.download.subprocess.Popen')
+#     mock_process = MagicMock()
+#     mock_process.poll.return_value = 0  # Simulate successful completion
+#     mock_process.returncode = 0
+#     mock_process.communicate.return_value = ('', '')
+#     mock_popen.return_value = mock_process
+#     return mock_popen
+
 
 @pytest.fixture
-def mock_vcp(mocker):
-    """Mock the vcp subprocess to prevent actual downloads."""
-    mock_popen = mocker.patch('unionsdata.download.subprocess.Popen')
-    mock_process = MagicMock()
-    mock_process.poll.return_value = 0  # Simulate successful completion
-    mock_process.returncode = 0
-    mock_process.communicate.return_value = ('', '')
-    mock_popen.return_value = mock_process
+def mock_vcp(mocker, tmp_path: Path):
+    """Mock the vcp subprocess to prevent actual downloads AND create temp files."""
+
+    def mock_popen_side_effect(*args, **kwargs):
+        # Extract the output path from vcp command: ['vcp', '-v', 'vos:...', '/path/to/temp.fits']
+        if len(args) > 0 and isinstance(args[0], list) and args[0][0] == 'vcp':
+            output_path = Path(args[0][3])  # 4th argument is the output path
+
+            # Create the temp file to simulate vcp download
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b'0' * 1000000)  # 1MB fake FITS file
+
+        # Return a mock process that indicates success
+        mock_process = MagicMock()
+        mock_process.poll.return_value = 0
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ('', '')
+        return mock_process
+
+    mock_popen = mocker.patch(
+        'unionsdata.download.subprocess.Popen', side_effect=mock_popen_side_effect
+    )
     return mock_popen
 
 
@@ -87,6 +112,7 @@ runtime:
   n_cutout_processes: 2
   bands: ["whigs-g", "cfis_lsb-r", "ps-i"]
   resume: false
+  max_retries: 3
 
 tiles:
   update_tiles: false
@@ -199,6 +225,21 @@ def setup_tile_info(test_config: Path) -> None:
     joblib.dump(tree, tile_info_dir / 'kdtree_xyz.joblib')
 
 
+@pytest.fixture
+def mock_decompress(mocker):
+    """Mock FITS decompression to prevent funpack calls."""
+    return mocker.patch('unionsdata.download.decompress_fits')
+
+
+@pytest.fixture
+def mock_cutout_creation(mocker):
+    """Mock cutout creation to prevent actual processing."""
+    return mocker.patch(
+        'unionsdata.download.create_cutouts_for_tile',
+        return_value=10,  # Return number of cutouts created
+    )
+
+
 def test_run_download_integration_basic(
     tmp_path: Path,
     test_config: Path,
@@ -209,6 +250,8 @@ def test_run_download_integration_basic(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test basic run_download workflow with tiles input."""
@@ -263,6 +306,8 @@ def test_run_download_integration_cli_override_bands(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band override from CLI."""
@@ -294,6 +339,8 @@ def test_run_download_integration_cli_override_tiles(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with tile override from CLI."""
@@ -325,6 +372,8 @@ def test_run_download_integration_coordinates(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with coordinates input."""
@@ -358,6 +407,7 @@ def test_run_download_integration_no_tiles_to_download(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download when no tiles match the criteria."""
@@ -389,6 +439,8 @@ def test_run_download_integration_resume_mode(
     mock_config_loading: None,
     mock_header_fetch: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     mocker,
     caplog: LogCaptureFixture,
 ) -> None:
@@ -407,8 +459,11 @@ def test_run_download_integration_resume_mode(
 
     # Mock verify_download with updated signature (file_path, expected_size)
     def mock_verify(file_path: Path, expected_size: int | None) -> bool:
-        # Return True only for the pre-existing file AND it must exist
-        return file_path == existing_file and file_path.exists()
+        # Pre-existing file: already verified
+        if file_path == existing_file and file_path.exists():
+            return True
+        # Newly downloaded files: verify if they exist
+        return file_path.exists()
 
     mocker.patch('unionsdata.download.verify_download', side_effect=mock_verify)
 
@@ -432,6 +487,9 @@ def test_run_download_integration_resume_mode(
     assert 'already downloaded and verified' in caplog.text
     # Should download the remaining 5 files (2 tiles × 3 bands - 1 existing)
     assert mock_vcp.call_count == 5
+    # Decompress should only be called for whigs-g downloads (1 tile)
+    # cfis_lsb-r and ps-i are not compressed, so total = 1 call
+    assert mock_decompress.call_count == 1
 
 
 def test_run_download_integration_band_constraint(
@@ -444,6 +502,8 @@ def test_run_download_integration_band_constraint(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test run_download with band_constraint filtering."""
@@ -479,6 +539,8 @@ def test_run_download_integration_error_handling(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     mocker,
     caplog: LogCaptureFixture,
 ) -> None:
@@ -502,12 +564,15 @@ def test_run_download_integration_error_handling(
         update_tiles=False,
     )
 
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.INFO):
         run_download(args)
 
     # Assert - Should log failures
     assert 'Failed downloading tile' in caplog.text
-    assert mock_popen.call_count == 2
+    assert mock_popen.call_count == 6
+
+    # Check that retries were logged
+    assert 'Retry' in caplog.text
 
 
 def test_run_download_integration_timing(
@@ -519,6 +584,8 @@ def test_run_download_integration_timing(
     mock_header_fetch: MagicMock,
     mock_verify_download: MagicMock,
     mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
     """Test that run_download reports timing information."""
@@ -539,3 +606,55 @@ def test_run_download_integration_timing(
     # Assert - Should log execution time
     assert 'Done! Execution took' in caplog.text
     assert mock_vcp.call_count == 6
+
+
+def test_run_download_integration_decompression_failure_retry(
+    test_config: Path,
+    setup_tile_info: None,
+    mock_vcp: MagicMock,
+    mock_setup_logger: MagicMock,
+    mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
+    mock_cutout_creation: MagicMock,
+    mocker,
+    caplog: LogCaptureFixture,
+) -> None:
+    """Test that decompression failures trigger download retry."""
+
+    # Mock decompress_fits to fail on first attempt, succeed on second
+    decompress_call_count = 0
+
+    def mock_decompress_side_effect(path: Path) -> None:
+        nonlocal decompress_call_count
+        decompress_call_count += 1
+        # Fail on 1st and 3rd calls (one for each tile's first attempt)
+        if decompress_call_count in [1, 3]:
+            raise RuntimeError('funpack failed: FITSIO status = 415')
+        # Succeed on 2nd and 4th calls
+
+    mocker.patch('unionsdata.download.decompress_fits', side_effect=mock_decompress_side_effect)
+
+    args = argparse.Namespace(
+        config=test_config,
+        tiles=None,
+        coordinates=None,
+        dataframe=None,
+        all_tiles=False,
+        bands=['whigs-g'],  # Compressed band
+        update_tiles=False,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        run_download(args)
+
+    # Assert - Should show retry behavior
+    assert 'Failed to decompress' in caplog.text
+
+    # Should have 2 download attempts per tile (first fails, second succeeds)
+    # 2 tiles × 2 attempts = 4 vcp calls
+    assert mock_vcp.call_count == 4
+
+    # Decompression should have been called twice per tile (4 total)
+    assert decompress_call_count == 4

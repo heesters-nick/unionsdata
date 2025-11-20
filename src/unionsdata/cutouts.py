@@ -187,6 +187,7 @@ def create_cutouts_for_tile(
             )
             f.create_dataset('ra', data=catalog['ra'].to_numpy(), dtype=np.float32)
             f.create_dataset('dec', data=catalog['dec'].to_numpy(), dtype=np.float32)
+            f.create_dataset('tile', data=tile_key, dtype='S')
 
         logger.info(f'Saved {n_objects} cutouts to {output_path}')
         return n_objects

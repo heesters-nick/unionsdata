@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 import posixpath
 import queue
 import signal
@@ -99,6 +100,7 @@ def download_tile_one_band(
     band: str,
     shutdown_flag: Event,
     cert_path: Path,
+    max_retries: int,
 ) -> bool:
     """
     Download a tile in a specific band.
@@ -113,6 +115,7 @@ def download_tile_one_band(
         band: band name
         shutdown_flag: Event to signal shutdown
         cert_path: path to SSL certificate for verification
+        max_retries: maximum number of download retries
 
     Returns:
         success/failure
@@ -140,75 +143,125 @@ def download_tile_one_band(
             logger.warning(f'File {tile_fitsname} exists but failed verification, re-downloading.')
             final_path.unlink()
 
-    try:
-        logger.info(f'Downloading {tile_fitsname} for band {band}...')
-        start_time = time.time()
-        process = subprocess.Popen(
-            ['vcp', '-v', vos_path, str(temp_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                logger.info(
+                    f'Retry {attempt}/{max_retries} for tile {tile_fitsname} in band {band}...'
+                )
+            else:
+                logger.info(f'Downloading {tile_fitsname} for band {band}...')
 
-        while process.poll() is None:
-            if shutdown_flag.is_set():
-                logger.warning(f'Shutdown requested, terminating download of {tile_fitsname}')
-                process.terminate()
+            start_time = time.time()
+
+            process = subprocess.Popen(
+                ['vcp', '-v', vos_path, str(temp_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            while process.poll() is None:
+                if shutdown_flag.is_set():
+                    logger.warning(f'Shutdown requested, terminating download of {tile_fitsname}')
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    # Clean up temp file if it exists
+                    cleanup_temp_file(temp_path)
+                    return False
+                time.sleep(0.1)
+
+            # Check if process completed successfully
+            if process.returncode != 0:
+                stdout, stderr = process.communicate()
+                if stdout:
+                    logger.debug('vcp stdout:\n%s', stdout)
+                if stderr:
+                    logger.debug('vcp stderr:\n%s', stderr)
+                raise subprocess.CalledProcessError(process.returncode, process.args)
+
+            # change to path mode
+            temp_path.rename(final_path)
+
+            # Decompress for specific bands
+            if band in ['whigs-g', 'wishes-z']:
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                # Clean up temp file if it exists
-                cleanup_temp_file(temp_path)
+                    decompress_fits(final_path)
+                    logger.debug(f'Decompressed {final_path} successfully.')
+                except RuntimeError as e:
+                    logger.error(f'Failed to decompress {final_path}: {e}')
+
+                    # Delete the corrupted file
+                    cleanup_temp_file(final_path)
+
+                    if attempt < max_retries:
+                        logger.info(
+                            f'Retrying download for {tile_fitsname} (attempt {attempt}/{max_retries})...'
+                        )
+                        time.sleep(2**attempt)  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(
+                            f'Maximum retries reached for {tile_fitsname}. Download failed.'
+                        )
+                        return False
+
+            # Verify the download
+            if not verify_download(final_path, expected_file_size):
+                logger.error(f'Download verification failed for {tile_fitsname}')
+                cleanup_temp_file(final_path)
+
+                if attempt < max_retries:
+                    logger.warning(f'Verification failed, retrying ({attempt}/{max_retries})...')
+                    time.sleep(2**attempt)
+                    continue
+                else:
+                    return False
+
+            logger.info(
+                f'Successfully downloaded tile {tile_str(tile_numbers)} for band {band} in {np.round(time.time() - start_time, 1)} seconds.'
+            )
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
+            logger.error(f'Subprocess error details: {e}')
+            # Clean up temp file on error
+            cleanup_temp_file(temp_path)
+
+            if attempt < max_retries:
+                logger.warning(f'Download failed, retrying ({attempt}/{max_retries})...')
+                time.sleep(2**attempt)
+                continue
+            else:
                 return False
-            time.sleep(0.1)
 
-        # Check if process completed successfully
-        if process.returncode != 0:
-            stdout, stderr = process.communicate()
-            if stdout:
-                logger.debug('vcp stdout:\n%s', stdout)
-            if stderr:
-                logger.debug('vcp stderr:\n%s', stderr)
-            raise subprocess.CalledProcessError(process.returncode, process.args)
-
-        # change to path mode
-        temp_path.rename(final_path)
-
-        # Decompress for specific bands
-        if band in ['whigs-g', 'wishes-z']:
-            decompress_fits(final_path)
-
-        # Verify the download
-        if not verify_download(final_path, expected_file_size):
-            logger.error(f'Download verification failed for {tile_fitsname}')
-            cleanup_temp_file(final_path)
+        except FileNotFoundError:
+            logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
+            logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
+            # Clean up temp file on error
+            cleanup_temp_file(temp_path)
             return False
 
-        logger.info(
-            f'Successfully downloaded tile {tile_str(tile_numbers)} for band {band} in {np.round(time.time() - start_time, 1)} seconds.'
-        )
-        return True
+        except Exception as e:
+            logger.error(
+                f'Tile {tile_str(tile_numbers)} in {band}: an unexpected error occurred: {e}'
+            )
+            # Clean up temp file on error
+            cleanup_temp_file(temp_path)
 
-    except subprocess.CalledProcessError as e:
-        logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
-        logger.error(f'Subprocess error details: {e}')
-        # Clean up temp file on error
-        cleanup_temp_file(temp_path)
-        return False
+            if attempt < max_retries:
+                logger.warning(f'Unexpected error, retrying ({attempt}/{max_retries})...')
+                time.sleep(2**attempt)
+                continue
+            else:
+                return False
 
-    except FileNotFoundError:
-        logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
-        logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
-        # Clean up temp file on error
-        cleanup_temp_file(temp_path)
-        return False
-
-    except Exception as e:
-        logger.error(f'Tile {tile_str(tile_numbers)} in {band}: an unexpected error occurred: {e}')
-        # Clean up temp file on error
-        cleanup_temp_file(temp_path)
-        return False
+    # Should never get to this point but just in case
+    return False
 
 
 def download_worker(
@@ -221,6 +274,7 @@ def download_worker(
     tile_progress: dict[str, set[str]],
     tile_progress_lock: threading.Lock,
     cert_path: Path,
+    max_retries: int,
     tile_catalogs: dict[str, pd.DataFrame],
     cutouts: CutoutsCfg,
     cutout_executor: ProcessPoolExecutor | None,
@@ -240,6 +294,7 @@ def download_worker(
         tile_progress: Shared dict to track download progress per tile
         tile_progress_lock: Lock to synchronize access to tile_progress
         cert_path: Path to SSL certificate for verification
+        max_retries: Maximum number of download retries
         tile_catalogs: Dictionary of different tile catalogs
         cutouts: Configuration for cutouts
         cutout_executor: ProcessPoolExecutor for cutout creation
@@ -282,6 +337,7 @@ def download_worker(
                     band=band,
                     shutdown_flag=shutdown_flag,
                     cert_path=cert_path,
+                    max_retries=max_retries,
                 )
 
                 if success:
@@ -321,9 +377,7 @@ def download_worker(
                             bands_sorted_by_wavelength = [
                                 b for b in band_dictionary.keys() if b in tile_bands
                             ]
-                            cutout_save_dir = (
-                                download_dir / paths['tile_dir'] / cutouts.output_subdir
-                            )
+                            cutout_save_dir = paths['tile_dir'] / cutouts.output_subdir
                             try:
                                 future = cutout_executor.submit(
                                     create_cutouts_for_tile,
@@ -381,6 +435,7 @@ def download_tiles(
     num_threads: int,
     num_cutout_workers: int,
     cert_path: Path,
+    max_retries: int,
     catalog: pd.DataFrame,
     cutouts: CutoutsCfg,
 ) -> tuple[int, int, int]:
@@ -395,6 +450,7 @@ def download_tiles(
         num_threads: Number of worker threads to use
         num_cutout_workers: Number of cutout worker processes
         cert_path: Path to SSL certificate for verification
+        max_retries: Maximum number of download retries
         catalog: DataFrame with information about input sources
         cutouts: Cutouts configuration
 
@@ -419,7 +475,9 @@ def download_tiles(
     cutout_futures_lock = threading.Lock()
 
     if cutouts.enable:
-        cutout_executor = ProcessPoolExecutor(max_workers=num_cutout_workers)
+        # Use spawn method to avoid fork() warning with threads
+        mp_context = multiprocessing.get_context('spawn')
+        cutout_executor = ProcessPoolExecutor(max_workers=num_cutout_workers, mp_context=mp_context)
         logger.info(f'Started ProcessPoolExecutor with {num_cutout_workers} workers')
 
     # Signal handler for graceful shutdown
@@ -461,6 +519,7 @@ def download_tiles(
                 tile_progress,
                 tile_progress_lock,
                 cert_path,
+                max_retries,
                 tile_catalogs,
                 cutouts,
                 cutout_executor,

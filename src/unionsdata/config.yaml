@@ -16,8 +16,9 @@ logging:
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                                   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                         # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
+  max_retries: 3                                                   # maximum number of download retries per file
 
 tiles:
   update_tiles: false                                              # set to true to update tile list from the VOS vault
@@ -34,7 +35,7 @@ cutouts:
 
 inputs:
   # Choose the input source
-  source: "dataframe"                                                  # all_available | tiles | coordinates | dataframe
+  source: "dataframe"                                              # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]

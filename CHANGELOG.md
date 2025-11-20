@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - download verification by checking if downloaded files have the expected size
 - decompress compressed g-band and z-band files to speed up subsequent file loading times
 - post-download cutout creation, store in hdf5 files
+- added retry logic for downloads
 
 ## [0.1.1] - 2025-10-31
 

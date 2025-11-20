@@ -219,6 +219,7 @@ def run_download(args: argparse.Namespace) -> None:
             num_threads=download_threads,
             num_cutout_workers=cfg.runtime.n_cutout_processes,
             cert_path=cfg.paths.cert_path,
+            max_retries=cfg.runtime.max_retries,
             catalog=catalog,
             cutouts=cfg.cutouts,
         )

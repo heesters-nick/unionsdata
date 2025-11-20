@@ -30,6 +30,7 @@ runtime:
   n_cutout_processes: 2
   bands: ["whigs-g", "cfis_lsb-r"]
   resume: false
+  max_retries: 3
 
 tiles:
   update_tiles: false

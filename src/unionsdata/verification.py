@@ -37,7 +37,7 @@ def verify_download(
     actual_file_size = file_path.stat().st_size
 
     if actual_file_size == expected_file_size:
-        logger.info(f'✓ Size verified for {file_path.name}: {actual_file_size:,} bytes')
+        logger.debug(f'✓ Size verified for {file_path.name}: {actual_file_size:,} bytes')
         return True
     else:
         logger.warning(

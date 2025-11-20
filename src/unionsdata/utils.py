@@ -7,6 +7,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import cast
 
+import h5py
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
@@ -630,3 +631,36 @@ def split_by_tile(catalog: pd.DataFrame, tiles: list[str]) -> dict[str, pd.DataF
         if len(tile_catalog) > 0:
             tile_catalogs[tile] = tile_catalog
     return tile_catalogs
+
+
+def read_h5(
+    file_path: Path,
+    needed_datasets: list[str] | None = None,
+) -> dict[str, NDArray]:
+    """Reads cutout data from HDF5 file with optimized dataset selection.
+
+    Args:
+        file_path: path to HDF5 file
+        needed_datasets: list of datasets to read (None = read all)
+
+    Returns:
+        cutout_data (dict): dictionary with requested datasets
+    """
+    cutout_data = {}
+
+    with h5py.File(file_path, 'r') as f:
+        # Determine which datasets to load
+        if needed_datasets is None:
+            datasets_to_read = f.keys()
+        else:
+            datasets_to_read = [d for d in needed_datasets if d in f]
+
+        # Loop through and load only needed datasets
+        for dataset_name in datasets_to_read:
+            if dataset_name == 'cutouts':
+                data = np.nan_to_num(np.array(f[dataset_name]), nan=0.0)
+            else:
+                data = np.array(f[dataset_name])
+            cutout_data[dataset_name] = data
+
+    return cutout_data

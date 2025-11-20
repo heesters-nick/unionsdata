@@ -33,6 +33,7 @@ class RuntimeCfg(BaseModel):
     n_cutout_processes: int = Field(ge=1, le=32)
     bands: list[str] = Field(..., min_length=1, max_length=6)
     resume: bool = False
+    max_retries: int = Field(ge=1, le=10, default=3)
 
 
 class TilesCfg(BaseModel):
