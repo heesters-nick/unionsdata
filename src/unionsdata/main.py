@@ -211,7 +211,7 @@ def run_download(args: argparse.Namespace) -> None:
     download_threads = min(cfg.runtime.n_download_threads, len(download_jobs))
     logger.info(f'Starting downloads using {download_threads} threads...')
     try:
-        total_jobs, completed_jobs, failed_jobs = download_tiles(
+        total_jobs, completed_jobs, failed_jobs, tile_cutout_info = download_tiles(
             tiles_to_download=download_jobs,
             band_dictionary=selected_band_dict,
             download_dir=download_dir,
@@ -226,6 +226,27 @@ def run_download(args: argparse.Namespace) -> None:
     except Exception as e:
         logger.error(f'Error during download: {e}')
         raise
+
+    if (
+        not catalog.empty
+        and cfg.cutouts.enable
+        and cfg.inputs.source in ['coordinates', 'dataframe']
+    ):
+        successful_tiles = set(tile_cutout_info.keys())
+
+        # Add cutout_created flag
+        catalog['cutout_created'] = catalog['tile'].isin(successful_tiles).astype(int)
+
+        # Save augmented catalog
+        if cfg.inputs.source == 'dataframe':
+            input_name = cfg.inputs.dataframe.path.stem
+        else:
+            input_name = 'input_coordinates'
+        catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
+        catalog.to_csv(catalog_path, index=False)
+        logger.info(f'Saved augmented catalog to {catalog_path}')
+        logger.info(f'  Total objects: {len(catalog)}')
+        logger.info(f'  Cutouts created: {catalog["cutout_created"].sum()}')
 
     end = time.time()
     elapsed = end - start

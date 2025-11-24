@@ -67,16 +67,19 @@ paths_by_machine:
   local:
     root_dir_main: "/test/main"
     root_dir_data: "/test/data"
+    dir_tables: "/test/tables"
     cert_path: "{mock_cert_file}"
 
   canfar:
     root_dir_main: "/arc/test/main"
     root_dir_data: "/arc/test/data"
+    dir_tables: "/arc/test/tables"
     cert_path: "{mock_cert_file}"
 
   narval:
     root_dir_main: "/home/user/projects/profile/main"
     root_dir_data: "/home/user/projects/profile/data"
+    dir_tables: "/home/user/projects/profile/tables"
     cert_path: "{mock_cert_file}"
 
 bands:

@@ -97,6 +97,7 @@ class PathsByMachineEntry(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
+    dir_tables: Path
     cert_path: Path
 
 
@@ -159,6 +160,7 @@ class PathsResolved(BaseModel):
     model_config = ConfigDict(extra='forbid')
     root_dir_main: Path
     root_dir_data: Path
+    dir_tables: Path
     cert_path: Path
     tile_info_directory: Path
     log_directory: Path
@@ -205,6 +207,11 @@ class Settings(BaseModel):
         if self.inputs.source == 'coordinates':
             if not self.inputs.coordinates:
                 logger.warning('inputs.source is "coordinates" but no coordinates specified')
+
+        if self.inputs.source not in ['coordinates', 'dataframe'] and self.cutouts.enable:
+            logger.warning(
+                'Cutout creation is enabled but no object coordinates were supplied. No cutouts will be created.'
+            )
 
         if not self.paths.cert_path.exists():
             raise ValueError(f'Certificate file does not exist: {self.paths.cert_path}')
@@ -264,6 +271,7 @@ def load_settings(
         paths = PathsResolved(
             root_dir_main=root,
             root_dir_data=pm.root_dir_data,
+            dir_tables=pm.dir_tables,
             cert_path=pm.cert_path,
             tile_info_directory=root / pc.tile_info_dirname,
             log_directory=root / pc.logs_dirname,
@@ -274,6 +282,7 @@ def load_settings(
         paths = PathsResolved(
             root_dir_main=data_base,
             root_dir_data=pm.root_dir_data,
+            dir_tables=pm.dir_tables,
             cert_path=pm.cert_path,
             tile_info_directory=data_base / pc.tile_info_dirname,
             log_directory=data_base / pc.logs_dirname,

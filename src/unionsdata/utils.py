@@ -231,7 +231,7 @@ def tile_finder(
                 f'Object at ({obj_coord.ra.deg:.4f}, {obj_coord.dec.deg:.4f}) '
                 f'is in tile {tile_numbers} which has no requested bands'
             )
-            bands[i] = np.nan
+            bands[i] = []
             pix_coords[i] = np.nan, np.nan
             continue
         wcs = TileWCS()
@@ -241,8 +241,8 @@ def tile_finder(
 
     # add tile numbers and pixel coordinates to catalog
     catalog['tile'] = [tile_str(tile) for tile in tiles_matching_catalog]
-    catalog['x'] = pix_coords[:, 0]
-    catalog['y'] = pix_coords[:, 1]
+    catalog['x'] = np.round(pix_coords[:, 0], 4)
+    catalog['y'] = np.round(pix_coords[:, 1], 4)
     catalog['bands'] = bands
     catalog['n_bands'] = n_bands
     unique_tiles = list(set(tiles_matching_catalog.tolist()))

@@ -64,16 +64,19 @@ paths_by_machine:
   local:
     root_dir_main: "/home/nick/astro/unionsdata"
     root_dir_data: "/home/nick/astro/unionsdata/data"
+    dir_tables: "/home/nick/astro/unionsdata/tables"
     cert_path: "/home/nick/.ssl/cadcproxy.pem"
 
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"
     root_dir_data: "/arc/projects/unions"
+    dir_tables: "/arc/home/heestersnick/unionsdata/tables"
     cert_path: "/arc/home/heestersnick/.ssl/cadcproxy.pem"
 
   narval:
     root_dir_main: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer"
     root_dir_data: "/home/heesters/projects/def-sfabbro/heesters/data/unions"
+    dir_tables: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer/tables"
     cert_path: "/home/heesters/.ssl/cadcproxy.pem"
 
 bands:

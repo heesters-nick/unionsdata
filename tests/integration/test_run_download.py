@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import joblib
 import numpy as np
+import pandas as pd
 import pytest
 import yaml
 from _pytest.logging import LogCaptureFixture
@@ -13,17 +14,6 @@ from scipy.spatial import cKDTree
 
 from unionsdata.kd_tree import relate_coord_tile
 from unionsdata.main import run_download
-
-# @pytest.fixture
-# def mock_vcp(mocker):
-#     """Mock the vcp subprocess to prevent actual downloads."""
-#     mock_popen = mocker.patch('unionsdata.download.subprocess.Popen')
-#     mock_process = MagicMock()
-#     mock_process.poll.return_value = 0  # Simulate successful completion
-#     mock_process.returncode = 0
-#     mock_process.communicate.return_value = ('', '')
-#     mock_popen.return_value = mock_process
-#     return mock_popen
 
 
 @pytest.fixture
@@ -147,6 +137,7 @@ paths_by_machine:
   local:
     root_dir_main: "{tmp_path}"
     root_dir_data: "{tmp_path / 'data'}"
+    dir_tables: "{tmp_path / 'tables'}"
     cert_path: "{mock_cert_file}"
 
 bands:
@@ -233,11 +224,57 @@ def mock_decompress(mocker):
 
 @pytest.fixture
 def mock_cutout_creation(mocker):
-    """Mock cutout creation to prevent actual processing."""
-    return mocker.patch(
-        'unionsdata.download.create_cutouts_for_tile',
-        return_value=10,  # Return number of cutouts created
-    )
+    """Mock cutout creation with proper Future simulation."""
+    from concurrent.futures import Future
+
+    def mock_submit(fn, *args, **kwargs):
+        """Mock submit that returns a completed Future with realistic value."""
+        future = Future()
+
+        # Extract catalog from kwargs to return realistic count
+        catalog = kwargs.get('catalog')
+        if catalog is not None and not catalog.empty:
+            n_cutouts = len(catalog)
+        else:
+            n_cutouts = 0
+
+        future.set_result(n_cutouts)  # Return actual catalog size
+        return future
+
+    mock_executor = mocker.MagicMock()
+    mock_executor.submit.side_effect = mock_submit
+    mock_executor.shutdown = mocker.MagicMock()
+
+    mocker.patch('unionsdata.download.ProcessPoolExecutor', return_value=mock_executor)
+
+    return mock_executor
+
+
+@pytest.fixture
+def setup_table_dir(tmp_path: Path, test_config: Path) -> Path:
+    """Create tables directory for augmented catalog output."""
+    with open(test_config) as f:
+        config_data = yaml.safe_load(f)
+
+    tables_dir = Path(config_data['paths_by_machine']['local']['dir_tables'])
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    return tables_dir
+
+
+@pytest.fixture
+def test_dataframe(tmp_path: Path) -> Path:
+    """Create a test CSV file with coordinates."""
+    csv_path = tmp_path / 'test_coords.csv'
+
+    # Get coordinates for tiles we have in our mock setup
+    coords_data = []
+    for tile in [(217, 292), (234, 295)]:
+        ra, dec = relate_coord_tile(nums=tile)
+        coords_data.append({'ra': ra, 'dec': dec, 'ID': f'obj_{tile[0]}_{tile[1]}'})
+
+    df = pd.DataFrame(coords_data)
+    df.to_csv(csv_path, index=False)
+    return csv_path
 
 
 def test_run_download_integration_basic(
@@ -366,6 +403,7 @@ def test_run_download_integration_cli_override_tiles(
 def test_run_download_integration_coordinates(
     test_config: Path,
     setup_tile_info: None,
+    setup_table_dir: Path,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
@@ -396,6 +434,21 @@ def test_run_download_integration_coordinates(
     # Assert - Should download 1 tile × 3 bands = 3 calls
     assert mock_vcp.call_count == 3
     assert 'Filtering to 1 tiles based on input criteria' in caplog.text
+
+    # Check that augmented catalog was saved
+    catalog_path = setup_table_dir / 'input_coordinates_augmented.csv'
+    assert catalog_path.exists(), 'Augmented catalog should be saved'
+
+    # Validate catalog contents
+    catalog = pd.read_csv(catalog_path)
+    assert 'tile' in catalog.columns
+    assert 'x' in catalog.columns
+    assert 'y' in catalog.columns
+    assert 'bands' in catalog.columns
+    assert 'n_bands' in catalog.columns
+    assert 'cutout_created' in catalog.columns
+    assert len(catalog) == 1  # One coordinate
+    assert catalog['cutout_created'].iloc[0] == 1  # Cutout was created
 
 
 def test_run_download_integration_no_tiles_to_download(
@@ -658,3 +711,59 @@ def test_run_download_integration_decompression_failure_retry(
 
     # Decompression should have been called twice per tile (4 total)
     assert decompress_call_count == 4
+
+
+def test_run_download_integration_dataframe_with_cutouts(
+    test_config: Path,
+    setup_tile_info: None,
+    setup_table_dir: Path,
+    test_dataframe: Path,
+    mock_vcp: MagicMock,
+    mock_setup_logger: MagicMock,
+    mock_config_loading: None,
+    mock_header_fetch: MagicMock,
+    mock_verify_download: MagicMock,
+    mock_session: MagicMock,
+    mock_decompress: MagicMock,
+    mock_cutout_creation: MagicMock,
+    caplog: LogCaptureFixture,
+) -> None:
+    """Test run_download with dataframe input and cutout creation."""
+
+    args = argparse.Namespace(
+        config=test_config,
+        tiles=None,
+        coordinates=None,
+        dataframe=str(test_dataframe),
+        all_tiles=False,
+        bands=None,
+        update_tiles=False,
+        cutouts=True,
+    )
+
+    with caplog.at_level(logging.INFO):
+        run_download(args)
+
+    # Should download 2 tiles × 3 bands = 6 calls
+    assert mock_vcp.call_count == 6
+    assert 'Filtering to 2 tiles based on input criteria' in caplog.text
+
+    # Check that augmented catalog was saved with correct name
+    catalog_path = setup_table_dir / 'test_coords_augmented.csv'
+    assert catalog_path.exists(), 'Augmented catalog should be saved'
+
+    # Validate catalog contents
+    catalog = pd.read_csv(catalog_path)
+    assert len(catalog) == 2  # Two objects
+    assert 'cutout_created' in catalog.columns
+    assert catalog['cutout_created'].sum() == 2  # Both cutouts created
+
+    # Check augmented columns
+    required_cols = ['ra', 'dec', 'ID', 'tile', 'x', 'y', 'bands', 'n_bands', 'cutout_created']
+    for col in required_cols:
+        assert col in catalog.columns, f'Missing column: {col}'
+
+    # Log summary
+    assert 'Saved augmented catalog' in caplog.text
+    assert 'Total objects: 2' in caplog.text
+    assert 'Cutouts created: 2' in caplog.text

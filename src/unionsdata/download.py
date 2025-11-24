@@ -438,7 +438,7 @@ def download_tiles(
     max_retries: int,
     catalog: pd.DataFrame,
     cutouts: CutoutsCfg,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, dict[str, list[str]]]:
     """
     Download a list of tiles using multiple worker threads.
 
@@ -455,7 +455,7 @@ def download_tiles(
         cutouts: Cutouts configuration
 
     Returns:
-        tuple: (total_jobs, completed_jobs, failed_jobs)
+        tuple: (total_jobs, completed_jobs, failed_jobs, tile_cutout_info)
     """
 
     # Create queue and threading objects
@@ -585,6 +585,9 @@ def download_tiles(
             if t.is_alive():
                 logger.warning(f'Thread {t.name} did not shut down cleanly')
 
+        # Collect info about cutouts created
+        tile_cutout_info: dict[str, list[str]] = {}
+
         # Shutdown cutout executor
         if cutout_executor is not None:
             with cutout_futures_lock:
@@ -604,8 +607,12 @@ def download_tiles(
                 with cutout_futures_lock:
                     for tile_key, future in cutout_futures.items():
                         try:
-                            n_cutouts = future.result(timeout=300)  # 5 minutes per tile
+                            n_cutouts = future.result(timeout=0.1)  # already completed
                             if n_cutouts > 0:
+                                with tile_progress_lock:
+                                    tile_bands = sorted(tile_progress[tile_key])
+                                tile_cutout_info[tile_key] = tile_bands
+
                                 cutouts_succeeded += n_cutouts
                                 logger.debug(f'✓ Cutouts for tile {tile_key}: {n_cutouts} objects')
                             else:
@@ -653,7 +660,7 @@ def download_tiles(
     logger.info(f'  {failed_jobs} jobs failed.')
     logger.info('=' * 70)
 
-    return total_jobs, completed_jobs, failed_jobs
+    return total_jobs, completed_jobs, failed_jobs, tile_cutout_info
 
 
 def cleanup_temp_file(temp_path: Path) -> None:

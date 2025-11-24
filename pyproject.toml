@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.0",
     "PyYAML>=6.0",
     "h5py>=3.10.0",
+    "PyWavelets>=1.9.0"
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----
