@@ -280,6 +280,7 @@ def download_worker(
     cutout_executor: ProcessPoolExecutor | None,
     cutout_futures: dict[str, Future[int]],
     cutout_futures_lock: threading.Lock,
+    tiles_claimed_for_cutout: set[str],
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -300,6 +301,7 @@ def download_worker(
         cutout_executor: ProcessPoolExecutor for cutout creation
         cutout_futures: Dictionary to track cutout futures by tile_key
         cutout_futures_lock: Lock to synchronize access to cutout_futures
+        tiles_claimed_for_cutout: Set to track tiles already submitted for cutouts
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -378,26 +380,40 @@ def download_worker(
                                 b for b in band_dictionary.keys() if b in tile_bands
                             ]
                             cutout_save_dir = paths['tile_dir'] / cutouts.output_subdir
-                            try:
-                                future = cutout_executor.submit(
-                                    create_cutouts_for_tile,
-                                    tile=tile,
-                                    tile_dir=paths['tile_dir'],
-                                    bands=bands_sorted_by_wavelength,
-                                    catalog=tile_catalog,
-                                    band_dictionary=band_dictionary,
-                                    output_dir=cutout_save_dir,
-                                    cutout_size=cutouts.size_pix,
-                                )
-                                with cutout_futures_lock:
-                                    cutout_futures[tile_str_key] = future
 
-                                logger.debug(
-                                    f'Submitted tile {tile_str_key} for cutout creation '
-                                    f'({len(tile_catalog)} objects)'
-                                )
-                            except Exception as e:
-                                logger.error(f'Failed to submit cutout job for {tile_str_key}: {e}')
+                            # Check and claim under lock
+                            with cutout_futures_lock:
+                                if tile_str_key in tiles_claimed_for_cutout:
+                                    should_submit = False
+                                else:
+                                    tiles_claimed_for_cutout.add(tile_str_key)
+                                    should_submit = True
+
+                            if should_submit:
+                                try:
+                                    future = cutout_executor.submit(
+                                        create_cutouts_for_tile,
+                                        tile=tile,
+                                        tile_dir=paths['tile_dir'],
+                                        bands=bands_sorted_by_wavelength,
+                                        catalog=tile_catalog,
+                                        band_dictionary=band_dictionary,
+                                        output_dir=cutout_save_dir,
+                                        cutout_size=cutouts.size_pix,
+                                    )
+                                    with cutout_futures_lock:
+                                        cutout_futures[tile_str_key] = future
+
+                                    logger.debug(
+                                        f'Submitted tile {tile_str_key} for cutout creation '
+                                        f'({len(tile_catalog)} objects)'
+                                    )
+                                except Exception as e:
+                                    with cutout_futures_lock:
+                                        tiles_claimed_for_cutout.discard(tile_str_key)
+                                    logger.error(
+                                        f'Failed to submit cutout job for {tile_str_key}: {e}'
+                                    )
 
                     else:
                         logger.info(
@@ -468,6 +484,7 @@ def download_tiles(
         tile_key = tile_str(tile)
         tile_progress[tile_key] = set()
     tile_progress_lock = threading.Lock()
+    tiles_claimed_for_cutout: set[str] = set()
 
     # Multiprocess setup for cutout creation
     cutout_executor: ProcessPoolExecutor | None = None
@@ -525,6 +542,7 @@ def download_tiles(
                 cutout_executor,
                 cutout_futures,
                 cutout_futures_lock,
+                tiles_claimed_for_cutout,
             ),
             name=f'DownloadWorker-{i}',
         )
