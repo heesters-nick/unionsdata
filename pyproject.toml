@@ -15,7 +15,6 @@ authors = [{ name = "Nick Heesters" }]
 
 # ---- Runtime dependencies ----
 dependencies = [
-    "joblib>=1.5.1",
     "numpy>=2.3.1",
     "pandas>=2.3.1",
     "astropy>=7.1.0",
@@ -25,7 +24,8 @@ dependencies = [
     "pydantic>=2.0",
     "PyYAML>=6.0",
     "h5py>=3.10.0",
-    "PyWavelets>=1.9.0"
+    "PyWavelets>=1.9.0",
+    "matplotlib>=3.8.0",
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----
@@ -45,6 +45,7 @@ dev = [
     "types-tqdm",
     "scipy-stubs",
     "types-psutil",
+    "h5py-stubs",
 ]
 
 # ---- Console script entry points ----
@@ -94,7 +95,6 @@ module = [
     "pywt",
     "zoobot.*",
     "pyarrow.*",
-    "joblib",
     "astride",
     "vos",
     "sklearn.*",

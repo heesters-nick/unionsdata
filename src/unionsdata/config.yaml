@@ -32,6 +32,23 @@ cutouts:
   size_pix: 256                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
+plotting:
+  catalog_name: 'NGC5485_dwarfs'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
+  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                         # bands to use for RGB cutouts
+  mode: "grid"                                                     # grid | channel
+  max_cols: 7                                                      # max columns for grid mode
+  figsize: null                                                    # figure size (width, height) in inches; null for automatic
+  save_plot: true                                                  # save plots to disk
+  show_plot: false                                                 # display plots interactively
+  save_name: "{catalog_name}_cutouts.pdf"                          # filename for saved plot; supports {catalog_name} placeholder
+
+  rgb:
+    scaling_type: "asinh"  # 'asinh' or 'linear'
+    stretch: 125.0
+    Q: 7.0
+    gamma: 0.25
+    standard_zp: 30.0
+
 
 inputs:
   # Choose the input source
@@ -48,7 +65,7 @@ inputs:
     - [231.4445, 52.4447]
 
   dataframe:
-    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
+    path: "/home/nick/astro/unionsdata/tables/NGC5485_dwarfs.csv"        # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name
@@ -65,18 +82,21 @@ paths_by_machine:
     root_dir_main: "/home/nick/astro/unionsdata"
     root_dir_data: "/home/nick/astro/unionsdata/data"
     dir_tables: "/home/nick/astro/unionsdata/tables"
+    dir_figures: "/home/nick/astro/unionsdata/figures"
     cert_path: "/home/nick/.ssl/cadcproxy.pem"
 
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"
     root_dir_data: "/arc/projects/unions"
     dir_tables: "/arc/home/heestersnick/unionsdata/tables"
+    dir_figures: "/arc/home/heestersnick/unionsdata/figures"
     cert_path: "/arc/home/heestersnick/.ssl/cadcproxy.pem"
 
   narval:
     root_dir_main: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer"
     root_dir_data: "/home/heesters/projects/def-sfabbro/heesters/data/unions"
     dir_tables: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer/tables"
+    dir_figures: "/home/heesters/projects/def-sfabbro/heesters/github/TileSlicer/figures"
     cert_path: "/home/heesters/.ssl/cadcproxy.pem"
 
 bands:

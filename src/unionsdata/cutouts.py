@@ -174,14 +174,14 @@ def create_cutouts_for_tile(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f'{tile_key}_cutouts.h5'
 
-        with h5py.File(output_path, 'w') as f:
+        with h5py.File(str(output_path), 'w') as f:
             # Main data
             f.create_dataset('cutouts', data=cutouts)
 
             # Metadata
             f.create_dataset('bands', data=np.array(loaded_bands, dtype='S'))
             f.create_dataset(
-                'object_ids',
+                'object_id',
                 data=catalog['ID'].astype(str).to_numpy(),
                 dtype=h5py.string_dtype(encoding='utf-8'),
             )

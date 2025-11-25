@@ -1,7 +1,7 @@
 import logging
+import pickle
 from pathlib import Path
 
-import joblib
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
@@ -32,7 +32,8 @@ def build_tree(tiles: list[tuple[int, int]], tile_info_dir: Path, save: bool = T
     tile_coords_xyz = np.array([x.cartesian.xyz.value for x in tile_coords_c])  # type: ignore
     tree = cKDTree(tile_coords_xyz)
     if save:
-        joblib.dump(tree, tile_info_dir / 'kdtree_xyz.joblib')
+        with open(tile_info_dir / 'kdtree_xyz.pkl', 'wb') as f:
+            pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
     logger.debug('KD tree built successfully.')
 
 
@@ -50,8 +51,11 @@ def query_tree(
     Returns:
         tile name and distance object - nearest tile center
     """
-    loaded_tree = joblib.load(tile_info_dir / 'kdtree_xyz.joblib')
-    logger.debug(f'Loaded kd tree from {tile_info_dir / "kdtree_xyz.joblib"}')
+    tree_path = tile_info_dir / 'kdtree_xyz.pkl'
+
+    with open(tree_path, 'rb') as f:
+        loaded_tree = pickle.load(f)
+    logger.debug(f'Loaded kd tree from {tree_path}')
     try:
         tile_name, dist = find_tile(loaded_tree, tiles, coords)
         return tile_name, dist

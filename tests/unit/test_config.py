@@ -44,6 +44,23 @@ cutouts:
     size_pix: 256
     output_subdir: "cutouts"
 
+plotting:
+  catalog_name: 'test_catalog'
+  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']
+  mode: "grid"
+  max_cols: 7
+  figsize: null
+  save_plot: true
+  show_plot: false
+  save_name: "test_catalog_cutouts.pdf"
+
+  rgb:
+    scaling_type: "asinh"
+    stretch: 125.0
+    Q: 7.0
+    gamma: 0.25
+    standard_zp: 30.0
+
 inputs:
   source: "tiles"
   tiles:
@@ -68,18 +85,21 @@ paths_by_machine:
     root_dir_main: "/test/main"
     root_dir_data: "/test/data"
     dir_tables: "/test/tables"
+    dir_figures: "/test/figures"
     cert_path: "{mock_cert_file}"
 
   canfar:
     root_dir_main: "/arc/test/main"
     root_dir_data: "/arc/test/data"
     dir_tables: "/arc/test/tables"
+    dir_figures: "/arc/test/figures"
     cert_path: "{mock_cert_file}"
 
   narval:
     root_dir_main: "/home/user/projects/profile/main"
     root_dir_data: "/home/user/projects/profile/data"
     dir_tables: "/home/user/projects/profile/tables"
+    dir_figures: "/home/user/projects/profile/figures"
     cert_path: "{mock_cert_file}"
 
 bands:
@@ -307,7 +327,7 @@ def test_is_first_run_has_files(tmp_path: Path):
 
     # Create dummy files
     (tile_dir / 'whigs-g_tiles.txt').write_text('217_292\n')
-    (tile_dir / 'kdtree_xyz.joblib').write_text('dummy')
+    (tile_dir / 'kdtree_xyz.pkl').write_text('dummy')
 
     assert is_first_run(tile_dir) is False
 

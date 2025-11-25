@@ -51,7 +51,7 @@ def preprocess_cutout(
     green_band, _, green_idx = band_info_sorted[1]
     red_band, _, red_idx = band_info_sorted[2]
 
-    logger.info(f'RGB mapping: R={red_band}, G={green_band}, B={blue_band}')
+    logger.debug(f'RGB mapping: R={red_band}, G={green_band}, B={blue_band}')
 
     # Extract channels from cutout
     cutout_red = cutout[red_idx].copy()

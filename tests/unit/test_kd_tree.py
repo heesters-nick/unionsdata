@@ -1,6 +1,6 @@
+import pickle
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pytest
 from astropy.coordinates import SkyCoord
@@ -113,12 +113,12 @@ def test_build_tree_creates_file(tmp_path: Path):
     build_tree(tiles, tile_info_dir, save=True)
 
     # Check that file was created
-    tree_file = tile_info_dir / 'kdtree_xyz.joblib'
+    tree_file = tile_info_dir / 'kdtree_xyz.pkl'
     assert tree_file.exists()
 
     # Verify the tree is valid
-    tree = joblib.load(tree_file)
-    from scipy.spatial import cKDTree
+    with open(tree_file, 'rb') as f:
+        tree = pickle.load(f)
 
     assert isinstance(tree, cKDTree)
     assert tree.n == 3  # Should have 3 points (one per tile)
@@ -133,7 +133,7 @@ def test_build_tree_no_save(tmp_path: Path):
     build_tree(tiles, tile_info_dir, save=False)
 
     # File should not exist
-    tree_file = tile_info_dir / 'kdtree_xyz.joblib'
+    tree_file = tile_info_dir / 'kdtree_xyz.pkl'
     assert not tree_file.exists()
 
 
@@ -236,9 +236,8 @@ def test_query_tree_success(tmp_path: Path, mocker):
     tree = cKDTree(tile_coords_xyz)
 
     # Save the tree
-    import joblib
-
-    joblib.dump(tree, tile_info_dir / 'kdtree_xyz.joblib')
+    with open(tile_info_dir / 'kdtree_xyz.pkl', 'wb') as f:
+        pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Mock find_tile to return predictable result
     mocker.patch('unionsdata.kd_tree.find_tile', return_value=((217, 292), 0.5))
@@ -262,9 +261,8 @@ def test_query_tree_propagates_value_error(tmp_path: Path, mocker):
     tile_coords_xyz = np.array([x.cartesian.xyz.value for x in tile_coords_c])  # type: ignore
     tree = cKDTree(tile_coords_xyz)
 
-    import joblib
-
-    joblib.dump(tree, tile_info_dir / 'kdtree_xyz.joblib')
+    with open(tile_info_dir / 'kdtree_xyz.pkl', 'wb') as f:
+        pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Mock find_tile to raise ValueError
     mocker.patch(

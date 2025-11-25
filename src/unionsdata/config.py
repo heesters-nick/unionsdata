@@ -56,6 +56,32 @@ class CutoutsCfg(BaseModel):
     output_subdir: str
 
 
+class RGBCfg(BaseModel):
+    """RGB scaling configuration."""
+
+    model_config = ConfigDict(extra='forbid')
+    scaling_type: Literal['asinh', 'linear'] = 'asinh'
+    stretch: float = 125.0
+    Q: float = 7.0
+    gamma: float = 0.25
+    standard_zp: float = 30.0
+
+
+class PlottingCfg(BaseModel):
+    """Plotting configuration."""
+
+    model_config = ConfigDict(extra='forbid')
+    catalog_name: str
+    bands: list[str] = Field(..., min_length=3, max_length=3)
+    mode: Literal['grid', 'channel'] = 'grid'
+    max_cols: int = Field(ge=1, default=5)
+    figsize: tuple[int, int] | None = None
+    save_plot: bool = True
+    show_plot: bool = False
+    save_name: str = '{catalog_name}_cutouts.png'
+    rgb: RGBCfg = Field(default_factory=RGBCfg)
+
+
 class ColumnMap(BaseModel):
     """Column name mappings for dataframes."""
 
@@ -98,6 +124,7 @@ class PathsByMachineEntry(BaseModel):
     root_dir_main: Path
     root_dir_data: Path
     dir_tables: Path
+    dir_figures: Path
     cert_path: Path
 
 
@@ -137,6 +164,7 @@ class RawConfig(BaseModel):
     runtime: RuntimeCfg
     tiles: TilesCfg
     cutouts: CutoutsCfg
+    plotting: PlottingCfg
     inputs: InputsCfg
     paths_database: PathsDatabase
     paths_by_machine: dict[str, PathsByMachineEntry]
@@ -161,6 +189,7 @@ class PathsResolved(BaseModel):
     root_dir_main: Path
     root_dir_data: Path
     dir_tables: Path
+    dir_figures: Path
     cert_path: Path
     tile_info_directory: Path
     log_directory: Path
@@ -175,6 +204,7 @@ class Settings(BaseModel):
     runtime: RuntimeCfg
     tiles: TilesCfg
     cutouts: CutoutsCfg
+    plotting: PlottingCfg
     inputs: InputsCfg
     bands: dict[str, BandCfg]
     paths: PathsResolved
@@ -272,6 +302,7 @@ def load_settings(
             root_dir_main=root,
             root_dir_data=pm.root_dir_data,
             dir_tables=pm.dir_tables,
+            dir_figures=pm.dir_figures,
             cert_path=pm.cert_path,
             tile_info_directory=root / pc.tile_info_dirname,
             log_directory=root / pc.logs_dirname,
@@ -283,6 +314,7 @@ def load_settings(
             root_dir_main=data_base,
             root_dir_data=pm.root_dir_data,
             dir_tables=pm.dir_tables,
+            dir_figures=pm.dir_figures,
             cert_path=pm.cert_path,
             tile_info_directory=data_base / pc.tile_info_dirname,
             log_directory=data_base / pc.logs_dirname,
@@ -307,6 +339,7 @@ def load_settings(
         runtime=raw.runtime,
         tiles=raw.tiles,
         cutouts=raw.cutouts,
+        plotting=raw.plotting,
         inputs=raw.inputs,
         bands=raw.bands,
         paths=paths,
@@ -384,6 +417,9 @@ def ensure_runtime_dirs(cfg: Settings) -> None:
     directories = [
         cfg.paths.tile_info_directory,
         cfg.paths.log_directory,
+        cfg.paths.dir_tables,
+        cfg.paths.dir_figures,
+        cfg.paths.root_dir_data,
     ]
 
     for directory in directories:
@@ -506,7 +542,7 @@ def is_first_run(tile_info_dir: Path) -> bool:
 
     # Check for any band tile files
     tile_files = list(tile_info_dir.glob('*_tiles.txt'))
-    kdtree_file = tile_info_dir / 'kdtree_xyz.joblib'
+    kdtree_file = tile_info_dir / 'kdtree_xyz.pkl'
 
     if not tile_files or not kdtree_file.exists():
         return True

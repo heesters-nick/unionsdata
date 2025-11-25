@@ -23,6 +23,7 @@ from unionsdata.config import (
 )
 from unionsdata.download import download_tiles
 from unionsdata.logging_setup import setup_logger
+from unionsdata.plotting import cutouts_to_rgb, load_cutouts, plot_cutouts
 from unionsdata.utils import (
     TileAvailability,
     input_to_tile_list,
@@ -344,6 +345,90 @@ def run_validate(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def run_plot(args: argparse.Namespace) -> None:
+    """Plot RGB object cutouts from input dataframe or coordinates.
+    Uses configuration from config.yaml plotting section."""
+
+    plot_start = time.time()
+    # Parse arguments and load configuration
+    overrides = build_cli_overrides(args)
+    try:
+        cfg = load_settings(config_path=args.config, cli_overrides=overrides)
+        logger.info(f'Loaded config from: {cfg.config_source}')
+    except FileNotFoundError:
+        logger.error('No config file found!')
+        logger.info(
+            "Run 'unionsdata init' to create a config, or use --config /path/to/config.yaml"
+        )
+        sys.exit(1)
+    # Get rid of any previous log files if resume = False
+    purge_previous_run(cfg)
+
+    setup_logger(
+        log_dir=cfg.paths.log_directory,
+        name=cfg.logging.name,
+        logging_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
+        force=True,
+    )
+
+    logger.info('Plotting object cutouts..')
+
+    cfg_dict = settings_to_dict(cfg)
+
+    # Print settings in human readable format
+    cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
+    logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
+
+    # all_band_dict: dict[str, BandDict] = {
+    #     k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
+    #     for k in cfg.bands.keys()  # ALL bands, not just cfg.runtime.bands
+    # }
+
+    # filter considered bands from the full band dictionary
+    selected_band_dict: dict[str, BandDict] = {
+        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
+    }
+    # make sure necessary directories exist
+    ensure_runtime_dirs(cfg=cfg)
+
+    figure_dir = cfg.paths.dir_figures
+    table_dir = cfg.paths.dir_tables
+    data_dir = cfg.paths.root_dir_data
+    catalog_name = cfg.plotting.catalog_name
+    catalog_path = table_dir / (catalog_name + '_augmented.csv')
+    save_path = figure_dir / (cfg.plotting.save_name.format(catalog_name=catalog_name))
+
+    cutout_data = load_cutouts(
+        catalog_path=catalog_path,
+        bands_to_plot=cfg.plotting.bands,
+        data_dir=data_dir,
+        cutout_subdir=cfg.cutouts.output_subdir,
+    )
+
+    cutout_data = cutouts_to_rgb(
+        cutout_data=cutout_data,
+        band_config=selected_band_dict,
+        scaling_type=cfg.plotting.rgb.scaling_type,
+        stretch=cfg.plotting.rgb.stretch,
+        Q=cfg.plotting.rgb.Q,
+        gamma=cfg.plotting.rgb.gamma,
+        standard_zp=cfg.plotting.rgb.standard_zp,
+    )
+
+    plot_cutouts(
+        cutout_data=cutout_data,
+        mode=cfg.plotting.mode,
+        max_cols=cfg.plotting.max_cols,
+        figsize=cfg.plotting.figsize,
+        save_path=save_path,
+        show_plot=cfg.plotting.show_plot,
+    )
+
+    plot_end = time.time()
+    elapsed = plot_end - plot_start
+    logger.info(f'Plotting completed in {elapsed:.2f} seconds.')
+
+
 def cli_entry() -> None:
     """
     The main CLI entry point that dispatches to subcommands.
@@ -390,9 +475,16 @@ def cli_entry() -> None:
     parser_download = subparsers.add_parser(
         'download',
         help='Download UNIONS survey imaging data (default command)',
-        aliases=['run'],  # You can add aliases
+        aliases=['run'],
     )
-    # Add all your original arguments from parse_arguments() here
+
+    parser_plot = subparsers.add_parser(
+        'plot',
+        help='Plot RGB object cutouts from input dataframe or coordinates',
+    )
+    parser_plot.set_defaults(func=run_plot)
+
+    # Add all original arguments from parse_arguments() here
     input_group = parser_download.add_mutually_exclusive_group()
     input_group.add_argument(
         '--coordinates',

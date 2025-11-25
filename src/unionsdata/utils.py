@@ -648,10 +648,10 @@ def read_h5(
     """
     cutout_data = {}
 
-    with h5py.File(file_path, 'r') as f:
+    with h5py.File(str(file_path), 'r') as f:
         # Determine which datasets to load
         if needed_datasets is None:
-            datasets_to_read = f.keys()
+            datasets_to_read = list(f.keys())
         else:
             datasets_to_read = [d for d in needed_datasets if d in f]
 

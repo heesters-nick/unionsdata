@@ -1,9 +1,9 @@
 import argparse
 import logging
+import pickle
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -116,6 +116,23 @@ cutouts:
     size_pix: 256
     output_subdir: "cutouts"
 
+plotting:
+  catalog_name: 'test_catalog'
+  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']
+  mode: "grid"
+  max_cols: 7
+  figsize: null
+  save_plot: true
+  show_plot: false
+  save_name: "test_catalog_cutouts.pdf"
+
+  rgb:
+    scaling_type: "asinh"
+    stretch: 125.0
+    Q: 7.0
+    gamma: 0.25
+    standard_zp: 30.0
+
 inputs:
   source: "tiles"
   tiles:
@@ -138,6 +155,7 @@ paths_by_machine:
     root_dir_main: "{tmp_path}"
     root_dir_data: "{tmp_path / 'data'}"
     dir_tables: "{tmp_path / 'tables'}"
+    dir_figures: "{tmp_path / 'figures'}"
     cert_path: "{mock_cert_file}"
 
 bands:
@@ -213,7 +231,8 @@ def setup_tile_info(test_config: Path) -> None:
     tile_coords_c = SkyCoord(tile_coords[:, 0], tile_coords[:, 1], unit='deg', frame='icrs')
     tile_coords_xyz = np.array([x.cartesian.xyz.value for x in tile_coords_c])  # type: ignore
     tree = cKDTree(tile_coords_xyz)
-    joblib.dump(tree, tile_info_dir / 'kdtree_xyz.joblib')
+    with open(tile_info_dir / 'kdtree_xyz.pkl', 'wb') as f:
+        pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 @pytest.fixture
