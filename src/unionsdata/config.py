@@ -551,19 +551,17 @@ def is_first_run(tile_info_dir: Path) -> bool:
 
 
 def determine_install_mode() -> bool:
-    """Determine if the package is installed in editable/development mode or from PyPI via pip install unionsdata."""
+    """Determine if the package is installed in editable/development mode."""
     try:
         dist = distribution('unionsdata')
-        # Editable installs have .egg-link or direct_url.json
-        is_editable = (
-            any(f.name in ('direct_url.json', 'top_level.txt') for f in dist.files or [])
-            if dist.files
-            else False
-        )
+        if dist.files:
+            for f in dist.files:
+                if f.name == 'direct_url.json':
+                    content = f.read_text()
+                    return '"editable": true' in content
+        return False
     except Exception:
-        is_editable = False
-
-    return is_editable
+        return False
 
 
 def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
