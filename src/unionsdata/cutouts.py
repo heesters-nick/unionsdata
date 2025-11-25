@@ -4,10 +4,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord
+from astropy.units import Unit
 from numpy.typing import NDArray
 
 from unionsdata.config import BandDict
-from unionsdata.utils import open_fits, tile_str
+from unionsdata.utils import get_dataset, open_fits, tile_str
 
 logger = logging.getLogger(__name__)
 
@@ -123,34 +125,35 @@ def make_multiband_cutouts(
 def create_cutouts_for_tile(
     tile: tuple[int, int],
     tile_dir: Path,
-    bands: list[str],  # Ordered by wavelength
+    bands: list[str],
     catalog: pd.DataFrame,
     band_dictionary: dict[str, BandDict],
     output_dir: Path,
     cutout_size: int,
-) -> int:
+) -> tuple[int, int]:
     """
-    Create cutouts for all objects in a completed tile.
-
-    Args:
-        tile: Tile numbers (x, y)
-        tile_dir: Directory containing band subdirectories with FITS files
-        bands: List of bands in wavelength order
-        catalog: DataFrame with columns 'X', 'Y', 'ID', 'ra', 'dec'
-        band_dictionary: Band configurations (has 'zfill', 'name', etc.)
-        output_dir: Directory to save HDF5 files
-        cutout_size: Size of square cutouts in pixels
-
-    Returns:
-        Number of cutouts created
+    Create cutouts for objects in a tile.
+    Checks for existing objects via on-sky proximity and skips them.
     """
     tile_key = tile_str(tile)
-    n_objects = len(catalog)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f'{tile_key}_cutouts_{cutout_size}.h5'
 
-    logger.info(f'Creating {n_objects} cutouts for tile {tile_key} in {len(bands)} bands: {bands}')
+    # 1. Filter out objects that are already processed
+    catalog, skipped_count = filter_existing_objects(catalog, output_path, tile_key)
+
+    if len(catalog) == 0:
+        logger.debug(f'Tile {tile_key}: All objects already done. Skipping.')
+        return 0, skipped_count
+
+    # 2. Proceed with loading data only for the remaining objects
+    n_objects = len(catalog)
+    logger.debug(
+        f'Tile {tile_key}: Skipping {skipped_count} existing objects. Creating {n_objects} NEW cutouts in {len(bands)} bands'
+    )
 
     try:
-        # Load all bands into single array: (n_bands, 10000, 10000)
+        # Load image data (expensive step)
         multiband_data, loaded_bands = read_band_data(
             tile_dir=tile_dir,
             tile=tile,
@@ -158,9 +161,7 @@ def create_cutouts_for_tile(
             in_dict=band_dictionary,
         )
 
-        logger.debug(f'Loaded {len(loaded_bands)} bands: {loaded_bands}')
-
-        # Create cutouts: (n_objects, n_bands, cutout_size, cutout_size)
+        # Create cutouts in memory
         cutouts = make_multiband_cutouts(
             multiband_data=multiband_data,
             tile_str=tile_key,
@@ -168,30 +169,126 @@ def create_cutouts_for_tile(
             cutout_size=cutout_size,
         )
 
-        logger.debug(f'Created cutout array with shape {cutouts.shape}')
+        # Write to HDF5 (append or create)
+        write_to_h5(output_path, cutouts, catalog, loaded_bands, tile_key)
 
-        # Save to HDF5
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f'{tile_key}_cutouts.h5'
-
-        with h5py.File(str(output_path), 'w') as f:
-            # Main data
-            f.create_dataset('cutouts', data=cutouts)
-
-            # Metadata
-            f.create_dataset('bands', data=np.array(loaded_bands, dtype='S'))
-            f.create_dataset(
-                'object_id',
-                data=catalog['ID'].astype(str).to_numpy(),
-                dtype=h5py.string_dtype(encoding='utf-8'),
-            )
-            f.create_dataset('ra', data=catalog['ra'].to_numpy(), dtype=np.float32)
-            f.create_dataset('dec', data=catalog['dec'].to_numpy(), dtype=np.float32)
-            f.create_dataset('tile', data=tile_key, dtype=h5py.string_dtype(encoding='utf-8'))
-
-        logger.info(f'Saved {n_objects} cutouts to {output_path}')
-        return n_objects
+        return n_objects, skipped_count
 
     except Exception as e:
         logger.error(f'Failed to create cutouts for tile {tile_key}: {e}')
         raise
+
+
+def write_to_h5(
+    output_path: Path,
+    cutouts: NDArray[np.float32],
+    catalog: pd.DataFrame,
+    bands: list[str],
+    tile_key: str,
+) -> None:
+    """
+    Write cutouts to HDF5. Creates new file if missing, appends if exists.
+    Uses maxshape to allow datasets to grow indefinitely.
+    """
+    n_new = len(cutouts)
+
+    # Prepare data for writing
+    # Convert string data to fixed-size bytes (S) for HDF5 compatibility
+    ids_encoded = catalog['ID'].astype(str).to_numpy().astype('S')
+    tile_encoded = np.array([tile_key.encode('utf-8')] * n_new)
+
+    data_map = {
+        'cutouts': cutouts,
+        'object_id': ids_encoded,
+        'ra': catalog['ra'].to_numpy(dtype=np.float32),
+        'dec': catalog['dec'].to_numpy(dtype=np.float32),
+        'tile': tile_encoded,
+    }
+
+    if not output_path.exists():
+        # Case 1: Create new file with resizeable datasets
+        with h5py.File(str(output_path), 'w') as f:
+            f.create_dataset('bands', data=np.array(bands, dtype='S'))
+
+            for name, data in data_map.items():
+                # maxshape=(None, ...) makes the first dimension unlimited/resizeable
+                maxshape = (None,) + data.shape[1:]
+                f.create_dataset(name, data=data, maxshape=maxshape, chunks=True)
+
+        logger.debug(f'Created {output_path} with {n_new} cutouts')
+
+    else:
+        # Case 2: Append to existing file
+        with h5py.File(str(output_path), 'a') as f:
+            # Quick sanity check to ensure we aren't mixing different band data
+            if 'bands' in f:
+                saved_bands = [b.decode('utf-8') for b in np.array(get_dataset(f, 'bands'))]
+                if saved_bands != bands:
+                    raise ValueError(
+                        f'Band mismatch for {tile_key}. '
+                        f'File has {saved_bands}, new data has {bands}.'
+                    )
+
+            # Resize and append
+            for name, data in data_map.items():
+                if name in f:
+                    dset = get_dataset(f, name)
+                    dset.resize(dset.shape[0] + n_new, axis=0)
+                    dset[-n_new:] = data
+
+        logger.debug(f'Appended {n_new} cutouts to {output_path}')
+
+
+def filter_existing_objects(
+    catalog: pd.DataFrame,
+    output_path: Path,
+    tile_key: str,
+    threshold_arcsec: float = 5.0,
+) -> tuple[pd.DataFrame, int]:
+    """
+    Filter out objects from the catalog that are already present in the HDF5 file
+    based on on-sky proximity.
+    """
+    if not output_path.exists():
+        return catalog, 0
+
+    n_objects = len(catalog)
+
+    try:
+        with h5py.File(str(output_path), 'r') as f:
+            # Check if we have coordinates to match against
+            if 'ra' not in f or 'dec' not in f:
+                return catalog, 0
+
+            # Load existing coordinates
+            existing_ra = get_dataset(f, 'ra')[:]
+            existing_dec = get_dataset(f, 'dec')[:]
+
+            # Create SkyCoord objects
+            existing_coords = SkyCoord(ra=existing_ra, dec=existing_dec, unit='deg')
+            new_coords = SkyCoord(
+                ra=catalog['ra'].to_numpy(),
+                dec=catalog['dec'].to_numpy(),
+                unit='deg',
+            )
+
+            # Find nearest existing object for each new object
+            # idx is the index in existing_coords, d2d is the separation
+            idx, d2d, _ = new_coords.match_to_catalog_sky(existing_coords)
+
+            # Define match threshold
+            threshold = threshold_arcsec * Unit('arcsec')
+            is_match = d2d < threshold
+
+            # Filter catalog: keep objects that DO NOT have a match
+            skipped_count = np.sum(is_match)
+            if skipped_count > 0:
+                logger.debug(
+                    f'Tile {tile_key}: {skipped_count}/{n_objects} objects already cut out.'
+                )
+                return catalog[~is_match].copy(), skipped_count
+
+    except Exception as e:
+        logger.warning(f'Error checking existing file {output_path} for matches: {e}')
+
+    return catalog, 0

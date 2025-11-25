@@ -47,6 +47,7 @@ cutouts:
 plotting:
   catalog_name: 'test_catalog'
   bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']
+  size_pix: 256
   mode: "grid"
   max_cols: 7
   figsize: null

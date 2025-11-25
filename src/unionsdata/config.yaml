@@ -29,18 +29,19 @@ tiles:
 cutouts:
   enable: true                                                     # create cutouts
   cutouts_only: false                                              # if true, only download cutouts, not full tiles
-  size_pix: 256                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
+  size_pix: 1024                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
-  catalog_name: 'NGC5485_dwarfs'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
+  catalog_name: 'input_coordinates'                                         # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
   bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                         # bands to use for RGB cutouts
+  size_pix: 1024                                                   # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
   figsize: null                                                    # figure size (width, height) in inches; null for automatic
   save_plot: true                                                  # save plots to disk
   show_plot: false                                                 # display plots interactively
-  save_name: "{catalog_name}_cutouts.pdf"                          # filename for saved plot; supports {catalog_name} placeholder
+  save_name: "{catalog_name}_cutouts_{size_pix}.pdf"               # filename for saved plot; supports {catalog_name} and {size_pix} placeholders
 
   rgb:
     scaling_type: "asinh"  # 'asinh' or 'linear'
@@ -52,7 +53,7 @@ plotting:
 
 inputs:
   # Choose the input source
-  source: "dataframe"                                              # all_available | tiles | coordinates | dataframe
+  source: "coordinates"                                              # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]
@@ -65,7 +66,7 @@ inputs:
     - [231.4445, 52.4447]
 
   dataframe:
-    path: "/home/nick/astro/unionsdata/tables/NGC5485_dwarfs.csv"        # CSV with RA/Dec/ID columns
+    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name

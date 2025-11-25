@@ -136,7 +136,7 @@ def run_download(args: argparse.Namespace) -> None:
     download_dir = cfg.paths.root_dir_data
 
     # Query availability of tiles
-    logger.info('Querying tile availability...')
+    logger.debug('Querying tile availability...')
     availability_all, all_tiles = query_availability(
         update=cfg.tiles.update_tiles,
         in_dict=all_band_dict,
@@ -154,7 +154,7 @@ def run_download(args: argparse.Namespace) -> None:
     availability = TileAvailability(selected_tiles, selected_band_dict)
 
     # Process input to get list of tiles to download
-    logger.info('Processing input to determine tiles to download...')
+    logger.debug('Processing input to determine tiles to download...')
     # get the list of tiles
     _, tiles_x_bands, catalog = input_to_tile_list(
         availability,
@@ -165,7 +165,7 @@ def run_download(args: argparse.Namespace) -> None:
     )
 
     if tiles_x_bands is not None:
-        logger.info(f'Filtering to {len(tiles_x_bands)} tiles based on input criteria')
+        logger.debug(f'Filtering to {len(tiles_x_bands)} tiles based on input criteria')
         tiles_set = set(tiles_x_bands)  # Convert list to set for faster lookup
 
         filtered_tiles = [
@@ -210,7 +210,7 @@ def run_download(args: argparse.Namespace) -> None:
 
     # Download the tiles
     download_threads = min(cfg.runtime.n_download_threads, len(download_jobs))
-    logger.info(f'Starting downloads using {download_threads} threads...')
+    logger.debug(f'Starting downloads using {download_threads} threads...')
     try:
         total_jobs, completed_jobs, failed_jobs, tile_cutout_info = download_tiles(
             tiles_to_download=download_jobs,
@@ -223,6 +223,9 @@ def run_download(args: argparse.Namespace) -> None:
             max_retries=cfg.runtime.max_retries,
             catalog=catalog,
             cutouts=cfg.cutouts,
+            log_dir=cfg.paths.log_directory,
+            log_name=cfg.logging.name,
+            log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
         )
     except Exception as e:
         logger.error(f'Error during download: {e}')
@@ -246,8 +249,6 @@ def run_download(args: argparse.Namespace) -> None:
         catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
         catalog.to_csv(catalog_path, index=False)
         logger.info(f'Saved augmented catalog to {catalog_path}')
-        logger.info(f'  Total objects: {len(catalog)}')
-        logger.info(f'  Cutouts created: {catalog["cutout_created"].sum()}')
 
     end = time.time()
     elapsed = end - start
@@ -394,15 +395,19 @@ def run_plot(args: argparse.Namespace) -> None:
     figure_dir = cfg.paths.dir_figures
     table_dir = cfg.paths.dir_tables
     data_dir = cfg.paths.root_dir_data
+    cutout_size = cfg.plotting.size_pix
     catalog_name = cfg.plotting.catalog_name
     catalog_path = table_dir / (catalog_name + '_augmented.csv')
-    save_path = figure_dir / (cfg.plotting.save_name.format(catalog_name=catalog_name))
+    save_path = figure_dir / (
+        cfg.plotting.save_name.format(catalog_name=catalog_name, size_pix=cutout_size)
+    )
 
     cutout_data = load_cutouts(
         catalog_path=catalog_path,
         bands_to_plot=cfg.plotting.bands,
         data_dir=data_dir,
         cutout_subdir=cfg.cutouts.output_subdir,
+        cutout_size=cutout_size,
     )
 
     cutout_data = cutouts_to_rgb(

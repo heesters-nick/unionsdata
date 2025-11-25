@@ -119,6 +119,7 @@ cutouts:
 plotting:
   catalog_name: 'test_catalog'
   bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']
+  size_pix: 256
   mode: "grid"
   max_cols: 7
   figsize: null
@@ -257,7 +258,7 @@ def mock_cutout_creation(mocker):
         else:
             n_cutouts = 0
 
-        future.set_result(n_cutouts)  # Return actual catalog size
+        future.set_result((n_cutouts, 0))  # Return actual catalog size
         return future
 
     mock_executor = mocker.MagicMock()
@@ -327,8 +328,6 @@ def test_run_download_integration_basic(
 
     # Assert - Check that expected steps occurred
     assert 'Starting UNIONS data download' in caplog.text
-    assert 'Querying tile availability' in caplog.text
-    assert 'Processing input to determine tiles to download' in caplog.text
     assert 'Total download jobs:' in caplog.text
 
     # Verify directory structure was created
@@ -416,7 +415,6 @@ def test_run_download_integration_cli_override_tiles(
 
     # Assert - Should only download 1 tile × 3 bands = 3 calls
     assert mock_vcp.call_count == 3
-    assert 'Filtering to 1 tiles based on input criteria' in caplog.text
 
 
 def test_run_download_integration_coordinates(
@@ -452,7 +450,6 @@ def test_run_download_integration_coordinates(
 
     # Assert - Should download 1 tile × 3 bands = 3 calls
     assert mock_vcp.call_count == 3
-    assert 'Filtering to 1 tiles based on input criteria' in caplog.text
 
     # Check that augmented catalog was saved
     catalog_path = setup_table_dir / 'input_coordinates_augmented.csv'
@@ -765,7 +762,6 @@ def test_run_download_integration_dataframe_with_cutouts(
 
     # Should download 2 tiles × 3 bands = 6 calls
     assert mock_vcp.call_count == 6
-    assert 'Filtering to 2 tiles based on input criteria' in caplog.text
 
     # Check that augmented catalog was saved with correct name
     catalog_path = setup_table_dir / 'test_coords_augmented.csv'
@@ -784,5 +780,3 @@ def test_run_download_integration_dataframe_with_cutouts(
 
     # Log summary
     assert 'Saved augmented catalog' in caplog.text
-    assert 'Total objects: 2' in caplog.text
-    assert 'Cutouts created: 2' in caplog.text

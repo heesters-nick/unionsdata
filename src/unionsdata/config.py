@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -76,12 +77,13 @@ class PlottingCfg(BaseModel):
     model_config = ConfigDict(extra='forbid')
     catalog_name: str
     bands: list[str] = Field(..., min_length=3, max_length=3)
+    size_pix: int = Field(ge=1)
     mode: Literal['grid', 'channel'] = 'grid'
     max_cols: int = Field(ge=1, default=5)
     figsize: tuple[int, int] | None = None
     save_plot: bool = True
     show_plot: bool = False
-    save_name: str = '{catalog_name}_cutouts.png'
+    save_name: str = '{catalog_name}_cutouts_{size_pix}.png'
     rgb: RGBCfg = Field(default_factory=RGBCfg)
 
 
@@ -556,17 +558,29 @@ def is_first_run(tile_info_dir: Path) -> bool:
 
 
 def determine_install_mode() -> bool:
-    """Determine if the package is installed in editable/development mode."""
+    """
+    Determine if the package is installed in editable/development mode
+    by checking PEP 660 metadata (direct_url.json).
+    """
     try:
+        # Get the distribution metadata for this package
         dist = distribution('unionsdata')
+
+        # Look for the direct_url.json file which contains install details
         if dist.files:
             for f in dist.files:
                 if f.name == 'direct_url.json':
-                    content = f.read_text()
-                    return '"editable": true' in content
-        return False
+                    # Parse the JSON to check the 'editable' flag
+                    # We use json.loads() to avoid brittle string matching
+                    data = json.loads(f.read_text())
+                    return data.get('dir_info', {}).get('editable', False)
+
     except Exception:
-        return False
+        # If the package isn't installed or metadata is missing,
+        # it's definitely not an editable install.
+        pass
+
+    return False
 
 
 def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
@@ -607,49 +621,20 @@ def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
 
 
 def check_cert_expiry(cert_path: Path, days_warning: int = 5) -> None:
-    """
-    Check if the SSL certificate is expired or expiring soon using cryptography.
-
-    Args:
-        cert_path: Path to the PEM certificate file.
-        days_warning: Number of days before expiration to start printing warnings.
-
-    Raises:
-        ValueError: If the certificate is expired or invalid.
-    """
     try:
         with open(cert_path, 'rb') as f:
-            cert_data = f.read()
+            cert = x509.load_pem_x509_certificate(f.read(), default_backend())
 
-        # Load the certificate
-        cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-
-        # Handle timezone awareness (modern cryptography versions use not_valid_after_utc)
-        try:
-            expiry_date = cert.not_valid_after_utc
-        except AttributeError:
-            # Fallback for older versions, ensure UTC
-            expiry_date = cert.not_valid_after.replace(tzinfo=UTC)
-
-        now = datetime.now(UTC)
-        time_left = expiry_date - now
+        # Simple UTC comparison to avoid timezone issues
+        expiry = cert.not_valid_after_utc
+        time_left = expiry - datetime.now(UTC)
 
         if time_left.total_seconds() < 0:
-            raise ValueError(
-                f'The CANFAR certificate at {cert_path} EXPIRED on {expiry_date}. '
-                'Please renew it using "cadc-get-cert -u YOUR_CANFAR_USERNAME"'
-            )
+            raise ValueError(f'Certificate at {cert_path} EXPIRED on {expiry}.')
 
         if time_left < timedelta(days=days_warning):
-            logger.warning(
-                f'Your certificate expires in {time_left.days} days ({expiry_date}). '
-                'Please renew it soon.'
-            )
+            logger.warning(f'Certificate expires in {time_left.days} days ({expiry}).')
 
-    except (ValueError, TypeError, x509.InvalidVersion) as e:
-        # If the file exists but isn't a valid cert, we stop execution
-        if 'EXPIRED' in str(e):
-            raise
-        logger.warning(f'Could not validate certificate format at {cert_path}: {e}')
     except Exception as e:
-        logger.warning(f'Unexpected error checking certificate: {e}')
+        # Mimic original behavior: log error instead of crashing
+        logger.warning(f'Could not validate certificate: {e}')

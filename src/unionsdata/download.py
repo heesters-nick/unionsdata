@@ -19,11 +19,17 @@ import requests
 
 from unionsdata.config import BandDict, CutoutsCfg
 from unionsdata.cutouts import create_cutouts_for_tile
+from unionsdata.logging_setup import setup_logger
 from unionsdata.utils import decompress_fits, split_by_tile, tile_str
 from unionsdata.verification import get_file_size, verify_download
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
+
+
+def worker_log_init(log_dir: Path, name: str, level: int) -> None:
+    """Initialize logging in worker process."""
+    setup_logger(log_dir, name, level, force=True)
 
 
 class TileBandSpec(TypedDict):
@@ -278,7 +284,7 @@ def download_worker(
     tile_catalogs: dict[str, pd.DataFrame],
     cutouts: CutoutsCfg,
     cutout_executor: ProcessPoolExecutor | None,
-    cutout_futures: dict[str, Future[int]],
+    cutout_futures: dict[str, Future[tuple[int, int]]],
     cutout_futures_lock: threading.Lock,
     tiles_claimed_for_cutout: set[str],
 ) -> None:
@@ -454,6 +460,9 @@ def download_tiles(
     max_retries: int,
     catalog: pd.DataFrame,
     cutouts: CutoutsCfg,
+    log_dir: Path,
+    log_name: str,
+    log_level: int,
 ) -> tuple[int, int, int, dict[str, list[str]]]:
     """
     Download a list of tiles using multiple worker threads.
@@ -469,6 +478,9 @@ def download_tiles(
         max_retries: Maximum number of download retries
         catalog: DataFrame with information about input sources
         cutouts: Cutouts configuration
+        log_dir: Directory to save logs
+        log_name: Name of the log file
+        log_level: Logging level
 
     Returns:
         tuple: (total_jobs, completed_jobs, failed_jobs, tile_cutout_info)
@@ -488,13 +500,18 @@ def download_tiles(
 
     # Multiprocess setup for cutout creation
     cutout_executor: ProcessPoolExecutor | None = None
-    cutout_futures: dict[str, Future[int]] = {}  # Track futures by tile_key
+    cutout_futures: dict[str, Future[tuple[int, int]]] = {}  # Track futures by tile_key
     cutout_futures_lock = threading.Lock()
 
     if cutouts.enable:
         # Use spawn method to avoid fork() warning with threads
         mp_context = multiprocessing.get_context('spawn')
-        cutout_executor = ProcessPoolExecutor(max_workers=num_cutout_workers, mp_context=mp_context)
+        cutout_executor = ProcessPoolExecutor(
+            max_workers=num_cutout_workers,
+            mp_context=mp_context,
+            initializer=worker_log_init,
+            initargs=(log_dir, log_name, log_level),
+        )
         logger.info(f'Started ProcessPoolExecutor with {num_cutout_workers} workers')
 
     # Signal handler for graceful shutdown
@@ -597,11 +614,23 @@ def download_tiles(
             download_queue.put((None, None))
 
         # Wait for all threads to finish
-        logger.info('Waiting for worker threads to finish...')
+        logger.debug('Waiting for worker threads to finish...')
         for t in threads:
             t.join(timeout=30)
             if t.is_alive():
                 logger.warning(f'Thread {t.name} did not shut down cleanly')
+
+        # Count remaining jobs (failures)
+        remaining_jobs = download_queue.qsize()
+        completed_jobs = total_jobs - remaining_jobs
+        failed_jobs = remaining_jobs
+
+        logger.info('=' * 70)
+        logger.info('DOWNLOAD SUMMARY:')
+        logger.info(f'  {len(complete_tiles)} tiles downloaded in all requested bands.')
+        logger.info(f'  {completed_jobs}/{total_jobs} jobs completed.')
+        logger.info(f'  {failed_jobs} jobs failed.')
+        logger.info('=' * 70)
 
         # Collect info about cutouts created
         tile_cutout_info: dict[str, list[str]] = {}
@@ -612,27 +641,56 @@ def download_tiles(
                 n_cutout_jobs = len(cutout_futures)
 
             if n_cutout_jobs > 0:
-                logger.info(f'Waiting for {n_cutout_jobs} cutout jobs to complete...')
+                logger.debug(f'Waiting for {n_cutout_jobs} cutout jobs to complete...')
+
+                # Wait for all futures to complete BEFORE shutdown
+                with cutout_futures_lock:
+                    futures_to_wait = list(cutout_futures.items())
+
+                # Collect results first (this blocks until complete)
+                # To make sure log messages look cleanly ordered
+                results: dict[str, tuple[int, int] | Exception] = {}
+                for tile_key, future in futures_to_wait:
+                    try:
+                        results[tile_key] = future.result(timeout=300)
+                    except Exception as e:
+                        results[tile_key] = e
 
                 # Don't submit new jobs, but wait for existing ones
                 cutout_executor.shutdown(wait=True, cancel_futures=False)
 
+                # Small delay to let any buffered log messages flush
+                time.sleep(0.2)
+
                 # Validate results
-                cutouts_succeeded = 0
+                cutouts_new = 0
                 cutouts_failed = 0
+                cutouts_skipped = 0
                 failed_tiles = []
 
                 with cutout_futures_lock:
                     for tile_key, future in cutout_futures.items():
                         try:
-                            n_cutouts = future.result(timeout=0.1)  # already completed
-                            if n_cutouts > 0:
+                            n_new, n_skipped = future.result(timeout=0.1)  # already completed
+                            n_total = n_new + n_skipped
+                            if n_total > 0:
                                 with tile_progress_lock:
                                     tile_bands = sorted(tile_progress[tile_key])
                                 tile_cutout_info[tile_key] = tile_bands
 
-                                cutouts_succeeded += n_cutouts
-                                logger.debug(f'✓ Cutouts for tile {tile_key}: {n_cutouts} objects')
+                                cutouts_new += n_new
+                                cutouts_skipped += n_skipped
+
+                                if n_new > 0 and n_skipped > 0:
+                                    logger.debug(
+                                        f'✓ Cutouts for tile {tile_key}: {n_new} new, {n_skipped} skipped (already exist)'
+                                    )
+                                elif n_new > 0:
+                                    logger.debug(f'✓ Cutouts for tile {tile_key}: {n_new} objects')
+                                else:
+                                    logger.debug(
+                                        f'✓ Cutouts for tile {tile_key}: {n_skipped} skipped (already exist)'
+                                    )
                             else:
                                 logger.warning(
                                     f'⚠ Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
@@ -648,12 +706,12 @@ def download_tiles(
                                 f'✗ Cutouts failed for tile {tile_key}: {e}', exc_info=True
                             )
 
-                logger.info('=' * 70)
                 logger.info('CUTOUT SUMMARY')
                 logger.info(f'  Total tiles processed: {n_cutout_jobs}')
                 logger.info(f'  Successful: {n_cutout_jobs - cutouts_failed}')
                 logger.info(f'  Failed: {cutouts_failed}')
-                logger.info(f'  Total cutouts created: {cutouts_succeeded}')
+                logger.info(f'  Total cutouts created: {cutouts_new}')
+                logger.info(f'  Cutouts skipped (already exist): {cutouts_skipped}')
 
                 if failed_tiles:
                     logger.warning(f'  Failed tiles: {", ".join(failed_tiles)}')
@@ -664,19 +722,6 @@ def download_tiles(
                 cutout_executor.shutdown(wait=False)
 
         cleanup_temp_files(download_dir)
-
-    # Count remaining jobs (failures)
-    remaining_jobs = download_queue.qsize()
-    completed_jobs = total_jobs - remaining_jobs
-    failed_jobs = remaining_jobs
-
-    if not cutouts.enable:
-        logger.info('=' * 70)
-    logger.info('DOWNLOAD SUMMARY:')
-    logger.info(f'  {len(complete_tiles)} tiles downloaded in all requested bands.')
-    logger.info(f'  {completed_jobs}/{total_jobs} jobs completed.')
-    logger.info(f'  {failed_jobs} jobs failed.')
-    logger.info('=' * 70)
 
     return total_jobs, completed_jobs, failed_jobs, tile_cutout_info
 

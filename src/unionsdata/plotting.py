@@ -1,7 +1,7 @@
 import logging
 from itertools import chain
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 import h5py
 import matplotlib.pyplot as plt
@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from unionsdata.config import BandDict
 from unionsdata.make_rgb import generate_rgb, preprocess_cutout
+from unionsdata.utils import get_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +27,12 @@ class CutoutData(TypedDict):
     bands: list[str]  # list of 3 band names used for RGB
 
 
-def _get_dataset(f: h5py.File, key: str) -> h5py.Dataset:
-    """Helper to cast h5py file access to Dataset type."""
-    return cast(h5py.Dataset, f[key])
-
-
 def load_cutouts(
     catalog_path: Path,
     bands_to_plot: list[str],
     data_dir: Path,
-    cutout_subdir: str = 'cutouts',
+    cutout_subdir: str,
+    cutout_size: int,
 ) -> CutoutData:
     """
     Load cutouts from HDF5 files for plotting, using augmented catalog as index.
@@ -45,6 +42,7 @@ def load_cutouts(
         bands_to_plot: List of exactly 3 band names for RGB visualization
         data_dir: Root data directory containing tile subdirectories
         cutout_subdir: Subdirectory name within each tile dir containing HDF5 files
+        cutout_size: Square size of cutouts in pixels
 
     Returns:
         Dictionary with:
@@ -101,7 +99,7 @@ def load_cutouts(
         catalog_ids = catalog_tile['ID'].astype(str).values
 
         # Build HDF5 path
-        h5_path = data_dir / tile / cutout_subdir / f'{tile}_cutouts.h5'
+        h5_path = data_dir / tile / cutout_subdir / f'{tile}_cutouts_{cutout_size}.h5'
 
         if not h5_path.exists():
             logger.warning(f'Skipping tile {tile}: HDF5 file not found at {h5_path}')
@@ -111,7 +109,7 @@ def load_cutouts(
         try:
             with h5py.File(h5_path, 'r') as f:
                 # Read bands available in this tile
-                bands_bytes = np.array(_get_dataset(f, 'bands'))
+                bands_bytes = np.array(get_dataset(f, 'bands'))
                 bands_in_file = [
                     b.decode('utf-8') if isinstance(b, bytes) else b for b in bands_bytes
                 ]
@@ -127,7 +125,7 @@ def load_cutouts(
                     continue
 
                 # Read object IDs and find matching indices
-                h5_ids = np.array(_get_dataset(f, 'object_id')).astype(str)
+                h5_ids = np.array(get_dataset(f, 'object_id')).astype(str)
                 matches = [(cat_id, np.where(h5_ids == cat_id)[0]) for cat_id in catalog_ids]
                 valid_matches = [(cat_id, idx[0]) for cat_id, idx in matches if len(idx) > 0]
 
@@ -139,15 +137,29 @@ def load_cutouts(
                 matched_catalog_ids = [cat_id for cat_id, _ in valid_matches]
                 indices_array = np.array([idx for _, idx in valid_matches], dtype=int)
 
+                # HDF5 requires indices in increasing order for fancy indexing
+                # Sort indices and keep track of original order to restore later
+                sort_order = np.argsort(indices_array)
+                sorted_indices = indices_array[sort_order]
+
                 # Load cutouts and extract requested bands
                 band_indices = [bands_in_file.index(b) for b in bands_to_plot]
-                cutouts_raw = np.array(_get_dataset(f, 'cutouts')[indices_array])
+                cutouts_raw = np.array(get_dataset(f, 'cutouts')[sorted_indices])
+
+                # Restore original order
+                restore_order = np.argsort(sort_order)
+                cutouts_raw = cutouts_raw[restore_order]
+
                 cutouts_3band = cutouts_raw[:, band_indices, :, :]
                 cutouts_3band = np.nan_to_num(cutouts_3band, nan=0.0).astype(np.float32)
 
-                # Load metadata
-                ra = np.array(_get_dataset(f, 'ra')[indices_array], dtype=np.float32)
-                dec = np.array(_get_dataset(f, 'dec')[indices_array], dtype=np.float32)
+                # Load metadata (also need sorted indices for HDF5)
+                ra_sorted = np.array(get_dataset(f, 'ra')[sorted_indices], dtype=np.float32)
+                dec_sorted = np.array(get_dataset(f, 'dec')[sorted_indices], dtype=np.float32)
+
+                # Restore original order for metadata
+                ra = ra_sorted[restore_order]
+                dec = dec_sorted[restore_order]
 
                 # Append to lists
                 cutouts_list.append(cutouts_3band)

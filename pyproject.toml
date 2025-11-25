@@ -26,7 +26,7 @@ dependencies = [
     "h5py>=3.10.0",
     "PyWavelets>=1.9.0",
     "matplotlib>=3.8.0",
-    "cryptography>=44.0.2",
+    "cryptography>=46.0.3"
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----

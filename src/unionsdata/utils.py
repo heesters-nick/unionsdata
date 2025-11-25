@@ -20,7 +20,6 @@ from vos import Client
 from unionsdata.config import BandDict, InputsCfg
 from unionsdata.kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 
-client = Client()
 logger = logging.getLogger(__name__)
 
 
@@ -664,3 +663,8 @@ def read_h5(
             cutout_data[dataset_name] = data
 
     return cutout_data
+
+
+def get_dataset(f: h5py.File, key: str) -> h5py.Dataset:
+    """Helper to cast h5py file access to Dataset type."""
+    return cast(h5py.Dataset, f[key])
