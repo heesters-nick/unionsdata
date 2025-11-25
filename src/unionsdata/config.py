@@ -3,12 +3,15 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import distribution
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 import yaml
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -245,6 +248,8 @@ class Settings(BaseModel):
 
         if not self.paths.cert_path.exists():
             raise ValueError(f'Certificate file does not exist: {self.paths.cert_path}')
+
+        check_cert_expiry(self.paths.cert_path)
 
         return self
 
@@ -599,3 +604,52 @@ def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
             )
 
     return config_path
+
+
+def check_cert_expiry(cert_path: Path, days_warning: int = 5) -> None:
+    """
+    Check if the SSL certificate is expired or expiring soon using cryptography.
+
+    Args:
+        cert_path: Path to the PEM certificate file.
+        days_warning: Number of days before expiration to start printing warnings.
+
+    Raises:
+        ValueError: If the certificate is expired or invalid.
+    """
+    try:
+        with open(cert_path, 'rb') as f:
+            cert_data = f.read()
+
+        # Load the certificate
+        cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+
+        # Handle timezone awareness (modern cryptography versions use not_valid_after_utc)
+        try:
+            expiry_date = cert.not_valid_after_utc
+        except AttributeError:
+            # Fallback for older versions, ensure UTC
+            expiry_date = cert.not_valid_after.replace(tzinfo=UTC)
+
+        now = datetime.now(UTC)
+        time_left = expiry_date - now
+
+        if time_left.total_seconds() < 0:
+            raise ValueError(
+                f'The CANFAR certificate at {cert_path} EXPIRED on {expiry_date}. '
+                'Please renew it using "cadc-get-cert -u YOUR_CANFAR_USERNAME"'
+            )
+
+        if time_left < timedelta(days=days_warning):
+            logger.warning(
+                f'Your certificate expires in {time_left.days} days ({expiry_date}). '
+                'Please renew it soon.'
+            )
+
+    except (ValueError, TypeError, x509.InvalidVersion) as e:
+        # If the file exists but isn't a valid cert, we stop execution
+        if 'EXPIRED' in str(e):
+            raise
+        logger.warning(f'Could not validate certificate format at {cert_path}: {e}')
+    except Exception as e:
+        logger.warning(f'Unexpected error checking certificate: {e}')

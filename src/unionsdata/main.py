@@ -116,7 +116,7 @@ def run_download(args: argparse.Namespace) -> None:
 
     # Print settings in human readable format
     cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
-    logger.info(f'Resolved config (YAML):\n{cfg_yaml}')
+    logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
     all_band_dict: dict[str, BandDict] = {
         k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
