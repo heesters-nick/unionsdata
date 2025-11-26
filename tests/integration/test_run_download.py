@@ -167,6 +167,16 @@ paths_by_machine:
     cert_path: "{mock_cert_file}"
 
 bands:
+  cfis-u:
+    name: "CFIS"
+    band: "u"
+    vos: "vos:cfis/tiles_DR6"
+    suffix: ".u.fits"
+    delimiter: "."
+    fits_ext: 0
+    zfill: 3
+    zp: 30.0
+
   whigs-g:
     name: "calexp-CFIS"
     band: "g"
@@ -177,10 +187,20 @@ bands:
     zfill: 0
     zp: 27.0
 
+  cfis-r:
+    name: "CFIS"
+    band: "r"
+    vos: "vos:cfis/tiles_DR6"
+    suffix: ".r.fits"
+    delimiter: "."
+    fits_ext: 0
+    zfill: 3
+    zp: 30.0
+
   cfis_lsb-r:
     name: "CFIS_LSB"
     band: "r"
-    vos: "vos:cfis/tiles_LSB_DR5"
+    vos: "vos:cfis/tiles_LSB_DR6"
     suffix: ".r.fits"
     delimiter: "."
     fits_ext: 0
@@ -223,9 +243,11 @@ def setup_tile_info(test_config: Path) -> None:
     tile_info_dir.mkdir(parents=True, exist_ok=True)
 
     # Create fake tile list files
+    (tile_info_dir / 'cfis-u_tiles.txt').write_text('CFIS.217.292.u.fits\nCFIS.234.295.u.fits\n')
     (tile_info_dir / 'whigs-g_tiles.txt').write_text(
         'calexp-CFIS_217_292.fits\ncalexp-CFIS_234_295.fits\n'
     )
+    (tile_info_dir / 'cfis-r_tiles.txt').write_text('CFIS.217.292.r.fits\nCFIS.234.295.r.fits\n')
     (tile_info_dir / 'cfis_lsb-r_tiles.txt').write_text(
         'CFIS_LSB.217.292.r.fits\nCFIS_LSB.234.295.r.fits\n'
     )
@@ -265,7 +287,7 @@ def mock_cutout_creation(mocker):
         else:
             n_cutouts = 0
 
-        future.set_result((n_cutouts, 0))  # Return actual catalog size
+        future.set_result((n_cutouts, 0, 0))  # Return actual catalog size
         return future
 
     mock_executor = mocker.MagicMock()

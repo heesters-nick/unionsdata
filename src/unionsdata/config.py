@@ -35,7 +35,7 @@ class RuntimeCfg(BaseModel):
     model_config = ConfigDict(extra='forbid')
     n_download_threads: int = Field(ge=1, le=32)
     n_cutout_processes: int = Field(ge=1, le=32)
-    bands: list[str] = Field(..., min_length=1, max_length=6)
+    bands: list[str] = Field(..., min_length=1, max_length=7)
     resume: bool = False
     max_retries: int = Field(ge=1, le=10, default=3)
 
@@ -46,7 +46,7 @@ class TilesCfg(BaseModel):
     model_config = ConfigDict(extra='forbid')
     update_tiles: bool = False
     show_tile_statistics: bool = True
-    band_constraint: int = Field(ge=1, le=6)
+    band_constraint: int = Field(ge=1, le=7)
     require_all_specified_bands: bool = False
 
 

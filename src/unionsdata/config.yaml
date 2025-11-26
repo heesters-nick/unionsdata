@@ -10,13 +10,13 @@
 machine: local                                                     # canfar | narval | local
 
 logging:
-  name: cutouts_gri
+  name: cutouts_cfis-r
   level: INFO
 
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["cfis-u", "whigs-g", 'cfis_lsb-r', 'ps-i', 'wishes-z']   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["cfis-u", "whigs-g", 'cfis_lsb-r', 'cfis-r', 'ps-i', 'wishes-z']   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
@@ -34,7 +34,7 @@ cutouts:
 
 plotting:
   catalog_name: 'NGC5485_dwarfs'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
-  bands: ['whigs-g', 'ps-i', 'wishes-z']                         # bands to use for RGB cutouts
+  bands: ['cfis-u', 'cfis-r', 'wishes-z']                         # bands to use for RGB cutouts
   size_pix: 512                                                    # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
@@ -120,6 +120,16 @@ bands:
     fits_ext: 1
     zfill: 0
     zp: 27.0
+
+  cfis-r:
+    name: "CFIS"
+    band: "r"
+    vos: "vos:cfis/tiles_DR6"
+    suffix: ".r.fits"
+    delimiter: "."
+    fits_ext: 0
+    zfill: 3
+    zp: 30.0
 
   cfis_lsb-r:
     name: "CFIS_LSB"

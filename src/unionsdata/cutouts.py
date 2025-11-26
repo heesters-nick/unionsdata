@@ -342,7 +342,7 @@ def create_cutouts_for_tile(
     all_band_dictionary: dict[str, BandDict],
     output_dir: Path,
     cutout_size: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """
     Create cutouts for objects in a tile.
 
@@ -364,7 +364,7 @@ def create_cutouts_for_tile(
         cutout_size: Square cutout size in pixels
 
     Returns:
-        Tuple of (n_new_objects_added, n_existing_objects_updated)
+        Tuple of (n_new_objects, n_updated_objects, n_skipped_objects)
     """
     tile_key = tile_str(tile)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -392,7 +392,7 @@ def create_cutouts_for_tile(
         )
 
         write_to_h5(output_path, cutouts, catalog, loaded_bands, tile_key, all_band_dictionary)
-        return len(catalog), 0
+        return len(catalog), 0, 0
 
     # File exists - determine what's new
     existing_bands_set = set(existing_info.bands)
@@ -409,6 +409,10 @@ def create_cutouts_for_tile(
     n_matched = int(np.sum(is_match))
     n_new_objects = len(catalog) - n_matched
 
+    # Initialize counts
+    n_updated_objects = 0
+    n_skipped_objects = 0
+
     logger.debug(
         f'Tile {tile_key}: {n_matched} existing objects, {n_new_objects} new objects, '
         f'{len(new_bands)} new bands ({new_bands})'
@@ -416,6 +420,7 @@ def create_cutouts_for_tile(
 
     # Case 2: Add new bands to existing objects
     if new_bands and n_matched > 0:
+        n_updated_objects = n_matched
         logger.debug(f'Tile {tile_key}: Adding bands {new_bands} to {n_matched} existing objects')
 
         # Load data for new bands only
@@ -447,6 +452,10 @@ def create_cutouts_for_tile(
 
             # Re-read existing_info after merge - bands have changed
             existing_info = analyze_existing_file(output_path)
+
+    elif n_matched > 0:
+        n_skipped_objects = n_matched
+        logger.debug(f'Tile {tile_key}: No new bands to add, skipping {n_matched} existing objects')
 
     # Case 3: Append new objects with cutouts in ALL available bands
     if n_new_objects > 0:
@@ -481,7 +490,7 @@ def create_cutouts_for_tile(
             all_band_dictionary,
         )
 
-    return n_new_objects, n_matched
+    return n_new_objects, n_updated_objects, n_skipped_objects
 
 
 def write_to_h5(

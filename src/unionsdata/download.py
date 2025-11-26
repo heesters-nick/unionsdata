@@ -294,7 +294,7 @@ def download_worker(
     tile_catalogs: dict[str, pd.DataFrame],
     cutouts: CutoutsCfg,
     cutout_executor: ProcessPoolExecutor | None,
-    cutout_futures: dict[str, Future[tuple[int, int]]],
+    cutout_futures: dict[str, Future[tuple[int, int, int]]],
     cutout_futures_lock: threading.Lock,
     tiles_claimed_for_cutout: set[str],
 ) -> None:
@@ -514,7 +514,7 @@ def download_tiles(
 
     # Multiprocess setup for cutout creation
     cutout_executor: ProcessPoolExecutor | None = None
-    cutout_futures: dict[str, Future[tuple[int, int]]] = {}  # Track futures by tile_key
+    cutout_futures: dict[str, Future[tuple[int, int, int]]] = {}  # Track futures by tile_key
     cutout_futures_lock = threading.Lock()
 
     if cutouts.enable:
@@ -663,7 +663,7 @@ def download_tiles(
 
                 # Collect results first (this blocks until complete)
                 # To make sure log messages look cleanly ordered
-                results: dict[str, tuple[int, int] | Exception] = {}
+                results: dict[str, tuple[int, int, int] | Exception] = {}
                 for tile_key, future in futures_to_wait:
                     try:
                         results[tile_key] = future.result(timeout=300)
@@ -680,13 +680,16 @@ def download_tiles(
                 cutouts_new = 0
                 cutouts_failed = 0
                 cutouts_skipped = 0
+                cutouts_updated = 0
                 failed_tiles = []
 
                 with cutout_futures_lock:
                     for tile_key, future in cutout_futures.items():
                         try:
-                            n_new, n_skipped = future.result(timeout=0.1)  # already completed
-                            n_total = n_new + n_skipped
+                            n_new, n_updated, n_skipped = future.result(
+                                timeout=0.1
+                            )  # already completed
+                            n_total = n_new + n_updated + n_skipped
                             if n_total > 0:
                                 with tile_progress_lock:
                                     tile_bands = sorted(tile_progress[tile_key])
@@ -694,17 +697,18 @@ def download_tiles(
 
                                 cutouts_new += n_new
                                 cutouts_skipped += n_skipped
+                                cutouts_updated += n_updated
 
-                                if n_new > 0 and n_skipped > 0:
-                                    logger.debug(
-                                        f'✓ Cutouts for tile {tile_key}: {n_new} new, {n_skipped} skipped (already exist)'
-                                    )
-                                elif n_new > 0:
-                                    logger.debug(f'✓ Cutouts for tile {tile_key}: {n_new} objects')
-                                else:
-                                    logger.debug(
-                                        f'✓ Cutouts for tile {tile_key}: {n_skipped} skipped (already exist)'
-                                    )
+                                parts = []
+                                if n_new > 0:
+                                    parts.append(f'{n_new} new')
+                                if n_updated > 0:
+                                    parts.append(f'{n_updated} updated')
+                                if n_skipped > 0:
+                                    parts.append(f'{n_skipped} skipped')
+
+                                msg = ', '.join(parts)
+                                logger.debug(f'✓ Cutouts for tile {tile_key}: {msg}')
                             else:
                                 logger.warning(
                                     f'⚠ Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
@@ -724,8 +728,12 @@ def download_tiles(
                 logger.info(f'  Total tiles processed: {n_cutout_jobs}')
                 logger.info(f'  Successful: {n_cutout_jobs - cutouts_failed}')
                 logger.info(f'  Failed: {cutouts_failed}')
+                logger.info(
+                    f'  Total objects: {cutouts_new + cutouts_skipped + cutouts_updated + cutouts_failed}'
+                )
                 logger.info(f'  Total cutouts created: {cutouts_new}')
                 logger.info(f'  Cutouts skipped (already exist): {cutouts_skipped}')
+                logger.info(f'  Cutouts updated (new bands): {cutouts_updated}')
 
                 if failed_tiles:
                     logger.warning(f'  Failed tiles: {", ".join(failed_tiles)}')
