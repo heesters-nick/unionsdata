@@ -10,15 +10,15 @@
 machine: local                                                     # canfar | narval | local
 
 logging:
-  name: download_test_cutouts
+  name: cutouts_gri
   level: INFO
 
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                         # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["cfis-u", "whigs-g", 'cfis_lsb-r', 'ps-i', 'wishes-z']   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
-  max_retries: 3                                                   # maximum number of download retries per file
+  max_retries: 5                                                   # maximum number of download retries per file
 
 tiles:
   update_tiles: false                                              # set to true to update tile list from the VOS vault
@@ -29,13 +29,13 @@ tiles:
 cutouts:
   enable: true                                                     # create cutouts
   cutouts_only: false                                              # if true, only download cutouts, not full tiles
-  size_pix: 1024                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
+  size_pix: 512                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
-  catalog_name: 'input_coordinates'                                         # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
-  bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']                         # bands to use for RGB cutouts
-  size_pix: 1024                                                   # square size of cutouts in pixels
+  catalog_name: 'NGC5485_dwarfs'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
+  bands: ['whigs-g', 'ps-i', 'wishes-z']                         # bands to use for RGB cutouts
+  size_pix: 512                                                    # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
   figsize: null                                                    # figure size (width, height) in inches; null for automatic
@@ -44,7 +44,7 @@ plotting:
   save_name: "{catalog_name}_cutouts_{size_pix}.pdf"               # filename for saved plot; supports {catalog_name} and {size_pix} placeholders
 
   rgb:
-    scaling_type: "asinh"  # 'asinh' or 'linear'
+    scaling_type: "asinh"                                          # 'asinh' or 'linear'
     stretch: 125.0
     Q: 7.0
     gamma: 0.25
@@ -53,7 +53,7 @@ plotting:
 
 inputs:
   # Choose the input source
-  source: "coordinates"                                              # all_available | tiles | coordinates | dataframe
+  source: "dataframe"                                              # all_available | tiles | coordinates | dataframe
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]
@@ -66,7 +66,7 @@ inputs:
     - [231.4445, 52.4447]
 
   dataframe:
-    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
+    path: "/home/nick/astro/unionsdata/tables/NGC5485_dwarfs.csv"  # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name

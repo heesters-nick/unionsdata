@@ -10,6 +10,7 @@ import pytest
 import yaml
 from _pytest.logging import LogCaptureFixture
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
 from scipy.spatial import cKDTree
 
 from unionsdata.kd_tree import relate_coord_tile
@@ -27,7 +28,13 @@ def mock_vcp(mocker, tmp_path: Path):
 
             # Create the temp file to simulate vcp download
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(b'0' * 1000000)  # 1MB fake FITS file
+
+            # Create a VALID minimal FITS file (Primary + 1 Extension)
+            # This passes is_fits_valid check for both fits_ext=0 and fits_ext=1
+            hdul = fits.HDUList(
+                [fits.PrimaryHDU(), fits.ImageHDU(data=np.zeros((10, 10), dtype=np.float32))]
+            )
+            hdul.writeto(output_path, overwrite=True)
 
         # Return a mock process that indicates success
         mock_process = MagicMock()
@@ -536,8 +543,12 @@ def test_run_download_integration_resume_mode(
 
     mocker.patch('unionsdata.download.verify_download', side_effect=mock_verify)
 
-    # Create a realistic-sized file (not just text)
-    existing_file.write_bytes(b'0' * 1000000)  # 1MB file
+    # CHANGE: Create a VALID FITS file for the existing one
+    # The previous version just wrote b'0' bytes, which would fail the new integrity check
+    hdul = fits.HDUList(
+        [fits.PrimaryHDU(), fits.ImageHDU(data=np.zeros((10, 10), dtype=np.float32))]
+    )
+    hdul.writeto(existing_file)
 
     args = argparse.Namespace(
         config=test_config,
@@ -557,7 +568,6 @@ def test_run_download_integration_resume_mode(
     # Should download the remaining 5 files (2 tiles × 3 bands - 1 existing)
     assert mock_vcp.call_count == 5
     # Decompress should only be called for whigs-g downloads (1 tile)
-    # cfis_lsb-r and ps-i are not compressed, so total = 1 call
     assert mock_decompress.call_count == 1
 
 

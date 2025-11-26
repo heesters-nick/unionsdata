@@ -215,6 +215,7 @@ def run_download(args: argparse.Namespace) -> None:
         total_jobs, completed_jobs, failed_jobs, tile_cutout_info = download_tiles(
             tiles_to_download=download_jobs,
             band_dictionary=selected_band_dict,
+            all_band_dictionary=all_band_dict,
             download_dir=download_dir,
             requested_bands=set(bands),
             num_threads=download_threads,

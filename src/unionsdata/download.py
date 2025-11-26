@@ -21,7 +21,7 @@ from unionsdata.config import BandDict, CutoutsCfg
 from unionsdata.cutouts import create_cutouts_for_tile
 from unionsdata.logging_setup import setup_logger
 from unionsdata.utils import decompress_fits, split_by_tile, tile_str
-from unionsdata.verification import get_file_size, verify_download
+from unionsdata.verification import get_file_size, is_fits_valid, verify_download
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
@@ -103,6 +103,7 @@ def download_tile_one_band(
     temp_path: Path,
     vos_path: str,
     http_url: str,
+    fits_ext: int,
     band: str,
     shutdown_flag: Event,
     cert_path: Path,
@@ -118,6 +119,7 @@ def download_tile_one_band(
         temp_path: path to file while download ongoing
         vos_path: path to file on server
         http_url: HTTP URL to file on server
+        fits_ext: FITS extension to verify
         band: band name
         shutdown_flag: Event to signal shutdown
         cert_path: path to SSL certificate for verification
@@ -191,6 +193,13 @@ def download_tile_one_band(
 
             # change to path mode
             temp_path.rename(final_path)
+
+            if not is_fits_valid(final_path, fits_ext=fits_ext):
+                logger.warning(
+                    f'Download corrupted (header check failed) for {tile_fitsname}. Attempting retry {attempt}/{max_retries}.'
+                )
+                cleanup_temp_file(final_path)
+                continue
 
             # Decompress for specific bands
             if band in ['whigs-g', 'wishes-z']:
@@ -273,6 +282,7 @@ def download_tile_one_band(
 def download_worker(
     download_queue: Queue[tuple[tuple[int, int], str]],
     band_dictionary: dict[str, BandDict],
+    all_band_dictionary: dict[str, BandDict],
     download_dir: Path,
     shutdown_flag: Event,
     requested_bands: set[str],
@@ -293,7 +303,8 @@ def download_worker(
 
     Args:
         download_queue: Queue containing (tile, band) tuples to download
-        band_dictionary: Dictionary with band specifications
+        band_dictionary: Dictionary with selected band specifications
+        all_band_dictionary: Dictionary with all band specifications
         download_dir: Directory to download files to
         shutdown_flag: Event to signal worker shutdown
         requested_bands: Set of bands that were requested for download
@@ -342,6 +353,7 @@ def download_worker(
                     temp_path=paths['temp_path'],
                     vos_path=paths['vos_path'],
                     http_url=paths['http_url'],
+                    fits_ext=paths['fits_ext'],
                     band=band,
                     shutdown_flag=shutdown_flag,
                     cert_path=cert_path,
@@ -403,7 +415,7 @@ def download_worker(
                                         tile_dir=paths['tile_dir'],
                                         bands=bands_sorted_by_wavelength,
                                         catalog=tile_catalog,
-                                        band_dictionary=band_dictionary,
+                                        all_band_dictionary=all_band_dictionary,
                                         output_dir=cutout_save_dir,
                                         cutout_size=cutouts.size_pix,
                                     )
@@ -452,6 +464,7 @@ def download_worker(
 def download_tiles(
     tiles_to_download: list[tuple[tuple[int, int], str]],
     band_dictionary: dict[str, BandDict],
+    all_band_dictionary: dict[str, BandDict],
     download_dir: Path,
     requested_bands: set[str],
     num_threads: int,
@@ -469,7 +482,8 @@ def download_tiles(
 
     Args:
         tiles_to_download: List of (tile, band) tuples to download
-        band_dictionary: Dictionary with band specifications
+        band_dictionary: Dictionary with selected band specifications
+        all_band_dictionary: Dictionary with all band specifications
         download_dir: Directory to download files to
         requested_bands: Set of bands that were requested
         num_threads: Number of worker threads to use
@@ -546,6 +560,7 @@ def download_tiles(
             args=(
                 download_queue,
                 band_dictionary,
+                all_band_dictionary,
                 download_dir,
                 shutdown_flag,
                 requested_bands,
@@ -620,10 +635,9 @@ def download_tiles(
             if t.is_alive():
                 logger.warning(f'Thread {t.name} did not shut down cleanly')
 
-        # Count remaining jobs (failures)
-        remaining_jobs = download_queue.qsize()
-        completed_jobs = total_jobs - remaining_jobs
-        failed_jobs = remaining_jobs
+        # Count completed and failed jobs
+        completed_jobs = sum(len(bands) for bands in tile_progress.values())
+        failed_jobs = total_jobs - completed_jobs
 
         logger.info('=' * 70)
         logger.info('DOWNLOAD SUMMARY:')

@@ -1,7 +1,12 @@
 import logging
 import math
 import re
+import warnings
 from pathlib import Path
+from typing import cast
+
+from astropy.io import fits
+from astropy.io.fits import BinTableHDU, ImageHDU, PrimaryHDU
 
 # FITS format constants
 FITS_BLOCK_SIZE = 2880  # bytes per FITS block
@@ -11,9 +16,47 @@ BYTES_PER_CARD = 80
 logger = logging.getLogger(__name__)
 
 
+def is_fits_valid(file_path: Path, fits_ext: int) -> bool:
+    """
+    Check if a FITS file is valid. Fails if Astropy detects truncation.
+    """
+    try:
+        # Catch warnings so we can fail on "File truncated"
+        with warnings.catch_warnings(record=True) as w:
+            # Cause all warnings to be recorded
+            warnings.simplefilter('always')
+
+            with fits.open(file_path, checksum=False) as hdul:
+                # Check 1: Did astropy warn us about truncation?
+                for warning in w:
+                    if 'truncated' in str(warning.message).lower():
+                        logger.warning(f'File corrupted (truncated): {file_path.name}')
+                        return False
+
+                # Check 2: Access Primary Header
+                primary = cast(PrimaryHDU, hdul[0])
+                _ = primary.header
+
+                # Check 3: Access Extension Header (if required)
+                if fits_ext > 0:
+                    if len(hdul) <= fits_ext:
+                        logger.warning(f'File {file_path.name} missing extension {fits_ext}')
+                        return False
+
+                    ext_hdu = cast(ImageHDU | PrimaryHDU | BinTableHDU, hdul[fits_ext])
+                    _ = ext_hdu.header
+
+        return True
+
+    except Exception as e:
+        logger.warning(f'Integrity check failed for {file_path.name}: {e}')
+        return False
+
+
 def verify_download(
     file_path: Path,
     expected_file_size: int | None,
+    tolerance: int = 28800,  # +- 10 FITS blocks
 ) -> bool:
     """
     Verify that downloaded file matches expected size from server.
@@ -21,6 +64,7 @@ def verify_download(
     Args:
         file_path: Path to downloaded file
         expected_file_size: Expected file size in bytes inferred from header
+        tolerance: Allowed size difference in bytes (default +- 10 FITS blocks)
 
     Returns:
         True if file size matches or size check unavailable, False if mismatch
@@ -36,7 +80,7 @@ def verify_download(
     # Size of the downloaded file
     actual_file_size = file_path.stat().st_size
 
-    if actual_file_size == expected_file_size:
+    if abs(actual_file_size - expected_file_size) <= tolerance:
         logger.debug(f'✓ Size verified for {file_path.name}: {actual_file_size:,} bytes')
         return True
     else:
