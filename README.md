@@ -15,6 +15,7 @@ A Python package for downloading multi-band imaging data from the Ultraviolet Ne
 🌳 **Spatial indexing** - KD-tree for efficient coordinate-to-tile matching\
 📊 **Progress tracking** - Real-time download status and completion reports\
 ⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
+✂️ **Cutout creation** - Create and plot RGB cutouts around objects of interest\
 🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup
 
 ## Quick Start
@@ -127,6 +128,9 @@ paths_by_machine:
     root_dir_main: "/path/to/your/project"
     # **Important**: define location for downloaded data
     root_dir_data: "/path/to/download/data"
+    dir_tables: "path/to/tables"
+    dir_figures: "path/to/figures"
+    cert_path: "/home/user/.ssl/cadcproxy.pem"
 ```
 
 **Step 3:** Set up CANFAR credentials
@@ -154,6 +158,7 @@ The package provides a `unionsdata` command with several subcommands:
 | `unionsdata validate` | Validate your configuration |
 | `unionsdata download` | Start downloading data |
 | `unionsdata` | Shortcut alias for `unionsdata download` |
+| `unionsdata plot` | Plot created cutouts |
 
 >**📝 Important - First Run:** On your first download, the package automatically detects this and downloads tile availability information from CANFAR (~5 minutes one-time setup). A KD-tree spatial index is built for efficient coordinate-to-tile matching. Subsequent runs use the cached data.
 >
@@ -227,8 +232,10 @@ logging:
 
 runtime:
   n_download_threads: 12
+  n_cutout_processes: 2
   bands: ["whigs-g", "cfis_lsb-r", "ps-i"]
   resume: false
+  max_retries: 5
 
 inputs:
   source: "tiles"  # Options: tiles, coordinates, dataframe, all_available
@@ -265,6 +272,7 @@ unionsdata
 |------|--------|--------|
 | `cfis-u` | CFIS | u-band |
 | `whigs-g` | WHIGS | g-band |
+| `cfis-r` | CFIS | r-band |
 | `cfis_lsb-r` | CFIS | r-band (LSB optimized) |
 | `ps-i` | Pan-STARRS | i-band |
 | `wishes-z` | WISHES | z-band |
@@ -294,11 +302,13 @@ data/
 | Section | Option | Description |
 |---------|--------|-------------|
 | `runtime` | `n_download_threads` | Number of parallel download threads (1-32) |
+| `runtime` | `n_cutout_processes` | Number of parallel cutout processes (1-32) |
 | `runtime` | `bands` | List of bands to download |
 | `runtime` | `resume` | Overwrite existing log file if `false` |
 | `tiles` | `update_tiles` | Refresh tile lists from VOSpace |
 | `tiles` | `band_constraint` | Minimum bands required per tile |
 | `tiles` | `require_all_specified_bands` | Require that all requested bands are available to download a tile |
+| `cutouts` | `enable` | Create cutouts around input coordinates. Works if input is `coordinates` or `dataframe` |
 | `inputs` | `source` | Input method: `tiles`, `coordinates`, `dataframe`, or `all_available` |
 
 ### Band Configuration
@@ -324,6 +334,7 @@ bands:
 |------|--------|
 | `cfis-u` | tiles_DR6 |
 | `whigs-g` | whigs |
+| `cfis-r` | tiles_DR6 |
 | `cfis_lsb-r` | tiles_LSB_DR6 |
 | `ps-i` | panstarrs |
 | `wishes-z` | wishes_1 |
