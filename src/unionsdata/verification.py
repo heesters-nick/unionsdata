@@ -18,38 +18,35 @@ logger = logging.getLogger(__name__)
 
 def is_fits_valid(file_path: Path, fits_ext: int) -> bool:
     """
-    Check if a FITS file is valid. Fails if Astropy detects truncation.
+    Check if a FITS file is valid.
+    Fails if Astropy detects truncation or if the last data row is missing.
     """
     try:
-        # Catch warnings so we can fail on "File truncated"
         with warnings.catch_warnings(record=True) as w:
-            # Cause all warnings to be recorded
             warnings.simplefilter('always')
 
+            # Open with memmap=True (default) to avoid reading the whole file into RAM
             with fits.open(file_path, checksum=False) as hdul:
-                # Check 1: Did astropy warn us about truncation?
+                # Check 1: Standard Astropy truncation warning
                 for warning in w:
                     if 'truncated' in str(warning.message).lower():
-                        logger.warning(f'File corrupted (truncated): {file_path.name}')
                         return False
 
-                # Check 2: Access Primary Header
-                primary = cast(PrimaryHDU, hdul[0])
-                _ = primary.header
+                # Check 2: Verify extension existence
+                if len(hdul) <= fits_ext:
+                    return False
 
-                # Check 3: Access Extension Header (if required)
-                if fits_ext > 0:
-                    if len(hdul) <= fits_ext:
-                        logger.warning(f'File {file_path.name} missing extension {fits_ext}')
-                        return False
-
-                    ext_hdu = cast(ImageHDU | PrimaryHDU | BinTableHDU, hdul[fits_ext])
-                    _ = ext_hdu.header
+                # Check 3: The "Simple Check" - Touch the last row of data
+                # This forces the OS to verify the file extends to the expected end position
+                hdu = cast(PrimaryHDU | ImageHDU | BinTableHDU, hdul[fits_ext])
+                if hdu.data is not None and hdu.data.size > 0:
+                    # Accessing the last element [-1] forces a seek to the end of the file
+                    _ = hdu.data[-1]
 
         return True
 
-    except Exception as e:
-        logger.warning(f'Integrity check failed for {file_path.name}: {e}')
+    except Exception:
+        # This catches index errors (file too short) or OS errors (seek past end of file)
         return False
 
 

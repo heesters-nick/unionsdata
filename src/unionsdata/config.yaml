@@ -16,13 +16,13 @@ logging:
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["cfis-u", "whigs-g", 'cfis_lsb-r', 'cfis-r', 'ps-i', 'wishes-z']   # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["whigs-g", 'cfis-r', 'ps-i']                       # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
 tiles:
   update_tiles: false                                              # set to true to update tile list from the VOS vault
-  show_tile_statistics: true
+  show_tile_statistics: false
   band_constraint: 1                                               # min bands for a tile to qualify for download
   require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
@@ -66,7 +66,7 @@ inputs:
     - [231.4445, 52.4447]
 
   dataframe:
-    path: "/home/nick/astro/unionsdata/tables/NGC5485_dwarfs.csv"  # CSV with RA/Dec/ID columns
+    path: "/home/nick/astro/unionsdata/tables/M81_selection.csv"  # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name

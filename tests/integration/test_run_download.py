@@ -673,7 +673,7 @@ def test_run_download_integration_error_handling(
     assert mock_popen.call_count == 6
 
     # Check that retries were logged
-    assert 'Retry' in caplog.text
+    assert 'Retrying' in caplog.text
 
 
 def test_run_download_integration_timing(

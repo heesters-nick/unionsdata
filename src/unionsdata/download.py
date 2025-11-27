@@ -155,7 +155,7 @@ def download_tile_one_band(
         try:
             if attempt > 1:
                 logger.info(
-                    f'Retry {attempt}/{max_retries} for tile {tile_fitsname} in band {band}...'
+                    f'Download attempt {attempt}/{max_retries} for tile {tile_fitsname} in band {band}...'
                 )
             else:
                 logger.info(f'Downloading {tile_fitsname} for band {band}...')
@@ -195,9 +195,7 @@ def download_tile_one_band(
             temp_path.rename(final_path)
 
             if not is_fits_valid(final_path, fits_ext=fits_ext):
-                logger.warning(
-                    f'Download corrupted (header check failed) for {tile_fitsname}. Attempting retry {attempt}/{max_retries}.'
-                )
+                logger.warning(f'Download corrupted (header check failed) for {tile_fitsname}.')
                 cleanup_temp_file(final_path)
                 continue
 
@@ -207,15 +205,12 @@ def download_tile_one_band(
                     decompress_fits(final_path)
                     logger.debug(f'Decompressed {final_path} successfully.')
                 except RuntimeError as e:
-                    logger.error(f'Failed to decompress {final_path}: {e}')
+                    logger.error(f'Failed to decompress {final_path}: {e}. Retrying download...')
 
                     # Delete the corrupted file
                     cleanup_temp_file(final_path)
 
                     if attempt < max_retries:
-                        logger.info(
-                            f'Retrying download for {tile_fitsname} (attempt {attempt}/{max_retries})...'
-                        )
                         time.sleep(2**attempt)  # Exponential backoff
                         continue
                     else:
@@ -230,7 +225,7 @@ def download_tile_one_band(
                 cleanup_temp_file(final_path)
 
                 if attempt < max_retries:
-                    logger.warning(f'Verification failed, retrying ({attempt}/{max_retries})...')
+                    logger.warning('Verification failed.')
                     time.sleep(2**attempt)
                     continue
                 else:
@@ -242,20 +237,27 @@ def download_tile_one_band(
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
+            logger.error(
+                f'Failed downloading tile {tile_str(tile_numbers)} for band {band}. Retrying...'
+            )
             logger.error(f'Subprocess error details: {e}')
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
 
+            if shutdown_flag.is_set():
+                return False
+
             if attempt < max_retries:
-                logger.warning(f'Download failed, retrying ({attempt}/{max_retries})...')
+                logger.warning('Download failed. Retrying...')
                 time.sleep(2**attempt)
                 continue
             else:
                 return False
 
         except FileNotFoundError:
-            logger.error(f'Failed downloading tile {tile_str(tile_numbers)} for band {band}.')
+            logger.error(
+                f'Failed downloading tile {tile_str(tile_numbers)} for band {band}. Retrying...'
+            )
             logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
@@ -268,8 +270,11 @@ def download_tile_one_band(
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
 
+            if shutdown_flag.is_set():
+                return False
+
             if attempt < max_retries:
-                logger.warning(f'Unexpected error, retrying ({attempt}/{max_retries})...')
+                logger.warning('Unexpected error. Retrying...')
                 time.sleep(2**attempt)
                 continue
             else:
@@ -743,7 +748,7 @@ def download_tiles(
                 logger.info('No cutout jobs were submitted')
                 cutout_executor.shutdown(wait=False)
 
-        cleanup_temp_files(download_dir)
+        # cleanup_temp_files(download_dir)
 
     return total_jobs, completed_jobs, failed_jobs, tile_cutout_info
 

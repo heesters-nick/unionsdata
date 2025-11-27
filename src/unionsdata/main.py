@@ -310,6 +310,7 @@ def run_init(args: argparse.Namespace) -> None:
 def run_edit(args: argparse.Namespace) -> None:
     """
     Open the user configuration file in the system's default editor.
+    Validates the configuration immediately after the editor closes.
     """
 
     user_config_path = get_user_config_dir() / 'config.yaml'
@@ -322,18 +323,46 @@ def run_edit(args: argparse.Namespace) -> None:
     # Get the system's default editor
     editor = os.environ.get('EDITOR', 'vim' if sys.platform != 'win32' else 'notepad')
 
-    logger.info(f'Opening {user_config_path} with {editor}...')
-    try:
-        subprocess.run([editor, str(user_config_path)], check=True)
-    except subprocess.CalledProcessError:
-        logger.error('Editor exited with an error')
-        sys.exit(1)
-    except FileNotFoundError:
-        logger.error(f'Editor "{editor}" not found. Set EDITOR environment variable.')
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f'Failed to open editor: {e}')
-        sys.exit(1)
+    while True:
+        logger.info(f'Opening {user_config_path} with {editor}...')
+        try:
+            subprocess.run([editor, str(user_config_path)], check=True)
+        except subprocess.CalledProcessError:
+            logger.error('Editor exited with an error')
+            sys.exit(1)
+        except FileNotFoundError:
+            logger.error(f'Editor "{editor}" not found. Set EDITOR environment variable.')
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f'Failed to open editor: {e}')
+            sys.exit(1)
+
+        # Validate the config immediately after closing editor
+        logger.info('Validating configuration...')
+        try:
+            # Try loading the settings - this runs all Pydantic validators
+            _ = load_settings(config_path=user_config_path, check_first_run=False)
+            logger.info('✓ Configuration is valid!')
+            break  # Exit the loop if valid
+
+        except Exception as e:
+            # Print the validation error clearly
+            logger.error(f'✗ Config validation failed:\n{e}')
+
+            # Simple interactive loop to ask user if they want to re-edit
+            try:
+                response = (
+                    input('\nWould you like to re-open the editor to fix this? [Y/n]: ')
+                    .lower()
+                    .strip()
+                )
+            except KeyboardInterrupt:
+                print()
+                sys.exit(1)
+
+            if response not in ('', 'y', 'yes'):
+                logger.warning('Exiting with invalid configuration.')
+                sys.exit(1)
 
 
 def run_validate(args: argparse.Namespace) -> None:
