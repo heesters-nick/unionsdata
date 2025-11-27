@@ -33,10 +33,10 @@ cutouts:
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
-  catalog_name: 'NGC5485_dwarfs'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
-  bands: ['cfis-u', 'cfis-r', 'wishes-z']                         # bands to use for RGB cutouts
+  catalog_name: 'M81_selection'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
+  bands: ['whigs-g', 'cfis-r', 'ps-i']                         # bands to use for RGB cutouts
   size_pix: 512                                                    # square size of cutouts in pixels
-  mode: "grid"                                                     # grid | channel
+  mode: "channel"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
   figsize: null                                                    # figure size (width, height) in inches; null for automatic
   save_plot: true                                                  # save plots to disk

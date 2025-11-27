@@ -6,16 +6,18 @@ import signal
 import subprocess
 import threading
 import time
-from concurrent.futures import Future, ProcessPoolExecutor, TimeoutError
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError
+from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Queue
-from threading import Event
+from threading import Event, Lock
 from types import FrameType
 from typing import TypedDict
 
 import numpy as np
 import pandas as pd
 import requests
+from tqdm import tqdm
 
 from unionsdata.config import BandDict, CutoutsCfg
 from unionsdata.cutouts import create_cutouts_for_tile
@@ -25,6 +27,171 @@ from unionsdata.verification import get_file_size, is_fits_valid, verify_downloa
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
+
+
+# ========== Progress Tracking ==========
+
+
+@dataclass
+class DownloadJob:
+    """Track a single file download with size information."""
+
+    tile: tuple[int, int]
+    band: str
+    final_path: Path
+    temp_path: Path
+    expected_size: int = 0
+    completed: bool = False
+
+
+@dataclass
+class ProgressTracker:
+    """Thread-safe tracker for download progress."""
+
+    jobs: list[DownloadJob] = field(default_factory=list)
+    _lock: Lock = field(default_factory=Lock)
+
+    def add_job(self, job: DownloadJob) -> None:
+        with self._lock:
+            self.jobs.append(job)
+
+    def mark_completed(self, final_path: Path) -> None:
+        with self._lock:
+            for job in self.jobs:
+                if job.final_path == final_path:
+                    job.completed = True
+                    break
+
+    def get_totals(self) -> tuple[int, int]:
+        """Get (current_bytes, expected_bytes) in a single pass."""
+        with self._lock:
+            expected_total = 0
+            current_total = 0
+
+            for job in self.jobs:
+                if job.expected_size == 0:
+                    continue
+
+                expected_total += job.expected_size
+
+                if job.completed:
+                    current_total += job.expected_size
+                elif job.final_path.exists():
+                    try:
+                        current_total += job.final_path.stat().st_size
+                    except OSError:
+                        pass
+                elif job.temp_path.exists():
+                    try:
+                        current_total += job.temp_path.stat().st_size
+                    except OSError:
+                        pass
+                else:
+                    # Check for .part files from vcp
+                    for pf in job.temp_path.parent.glob(f'{job.temp_path.name}*.part'):
+                        try:
+                            current_total += pf.stat().st_size
+                        except OSError:
+                            pass
+
+            return current_total, expected_total
+
+
+def fetch_expected_sizes(
+    jobs: list[tuple[tuple[int, int], str]],
+    band_dictionary: dict[str, BandDict],
+    download_dir: Path,
+    cert_path: Path,
+    max_workers: int = 8,
+) -> dict[Path, int]:
+    """Fetch expected file sizes for all jobs in parallel."""
+
+    path_to_size: dict[Path, int] = {}
+
+    def fetch_one(tile: tuple[int, int], band: str) -> tuple[Path, int]:
+        specs = tile_band_specs(tile, band_dictionary, band, download_dir)
+
+        # Skip if file already exists (will be verified during download)
+        if specs['final_path'].exists():
+            try:
+                return specs['final_path'], specs['final_path'].stat().st_size
+            except OSError:
+                pass
+
+        session = make_session(cert_path)
+        try:
+            header = fetch_fits_header(specs['http_url'], session, retries=2, timeout=10)
+            size = get_file_size(header) if header else 0
+        except Exception:
+            size = 0
+        finally:
+            session.close()
+        return specs['final_path'], size
+
+    logger.info(f'Fetching file size information for {len(jobs)} downloads...')
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fetch_one, tile, band) for tile, band in jobs]
+
+        for future in futures:
+            try:
+                path, size = future.result()
+                path_to_size[path] = size
+            except Exception:
+                pass
+
+    total_size = sum(path_to_size.values())
+    logger.info(f'Total expected download size: {total_size / (1024**3):.2f} GB')
+
+    return path_to_size
+
+
+def progress_monitor(
+    tracker: ProgressTracker,
+    shutdown_flag: Event,
+    update_interval: float = 0.5,
+) -> None:
+    """Monitor thread that updates progress bar based on file sizes."""
+    # Wait briefly for jobs to be populated and downloads to start
+    time.sleep(1.0)
+
+    _, total_bytes = tracker.get_totals()
+    if total_bytes == 0:
+        logger.warning('Could not determine expected download size, progress bar disabled')
+        return
+
+    with tqdm(
+        total=total_bytes,
+        unit='B',
+        unit_scale=True,
+        unit_divisor=1024,
+        desc='Downloading',
+        dynamic_ncols=True,
+        miniters=1,
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{rate_fmt}, {elapsed}<{remaining}]',
+    ) as pbar:
+        last_bytes = 0
+
+        while not shutdown_flag.is_set():
+            current_bytes, _ = tracker.get_totals()
+            delta = current_bytes - last_bytes
+
+            if delta > 0:
+                pbar.update(delta)
+                last_bytes = current_bytes
+
+            if current_bytes >= total_bytes:
+                break
+
+            time.sleep(update_interval)
+
+        # Final update
+        current_bytes, _ = tracker.get_totals()
+        if current_bytes > last_bytes:
+            pbar.update(current_bytes - last_bytes)
+
+
+# ========= Download Functions ==========
 
 
 def worker_log_init(log_dir: Path, name: str, level: int) -> None:
@@ -108,6 +275,7 @@ def download_tile_one_band(
     shutdown_flag: Event,
     cert_path: Path,
     max_retries: int,
+    expected_file_size: int | None = None,
 ) -> bool:
     """
     Download a tile in a specific band.
@@ -124,24 +292,26 @@ def download_tile_one_band(
         shutdown_flag: Event to signal shutdown
         cert_path: path to SSL certificate for verification
         max_retries: maximum number of download retries
+        expected_file_size: expected file size in bytes inferred from header
 
     Returns:
         success/failure
     """
-    session = None
-    expected_file_size = None
-    try:
-        session = make_session(cert_path)
-        header_content = fetch_fits_header(url=http_url, session=session)
-        if header_content is not None:
-            expected_file_size = get_file_size(header_content)
-        else:
-            logger.warning(f'Could not fetch header for download verification: {http_url}')
-    except Exception as e:
-        logger.warning(f'Error fetching header for download verification: {e}')
-    finally:
-        if session is not None:
-            session.close()
+    # Use pre-fetched expected size if available otherwise fetch it now
+    if expected_file_size is None or expected_file_size == 0:
+        session = None
+        try:
+            session = make_session(cert_path)
+            header_content = fetch_fits_header(url=http_url, session=session)
+            if header_content is not None:
+                expected_file_size = get_file_size(header_content)
+            else:
+                logger.warning(f'Could not fetch header for download verification: {http_url}')
+        except Exception as e:
+            logger.warning(f'Error fetching header for download verification: {e}')
+        finally:
+            if session is not None:
+                session.close()
 
     if final_path.is_file():
         if verify_download(final_path, expected_file_size):
@@ -302,6 +472,8 @@ def download_worker(
     cutout_futures: dict[str, Future[tuple[int, int, int]]],
     cutout_futures_lock: threading.Lock,
     tiles_claimed_for_cutout: set[str],
+    progress_tracker: ProgressTracker,
+    expected_sizes: dict[Path, int],
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -324,6 +496,8 @@ def download_worker(
         cutout_futures: Dictionary to track cutout futures by tile_key
         cutout_futures_lock: Lock to synchronize access to cutout_futures
         tiles_claimed_for_cutout: Set to track tiles already submitted for cutouts
+        progress_tracker: Shared ProgressTracker instance
+        expected_sizes: Dictionary mapping final_path to expected file size
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -350,6 +524,9 @@ def download_worker(
                     download_dir=download_dir,
                 )
 
+                # Get pre-fetched expected size
+                expected_size = expected_sizes.get(paths['final_path'], 0)
+
                 # Download the file
                 success = download_tile_one_band(
                     tile_numbers=tile,
@@ -363,10 +540,15 @@ def download_worker(
                     shutdown_flag=shutdown_flag,
                     cert_path=cert_path,
                     max_retries=max_retries,
+                    expected_file_size=expected_size if expected_size > 0 else None,
                 )
 
                 if success:
                     downloads_completed += 1
+
+                    # Mark as completed in progress tracker
+                    if progress_tracker is not None:
+                        progress_tracker.mark_completed(paths['final_path'])
 
                     # Track progress for this tile
                     tile_str_key = tile_str(tile)
@@ -541,6 +723,33 @@ def download_tiles(
     original_sigint = signal.signal(signal.SIGINT, signal_handler)
     original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
 
+    fetch_expected_sizes_start = time.time()
+    # Fetch expected file sizes in parallel for progress tracking
+    expected_sizes = fetch_expected_sizes(
+        jobs=tiles_to_download,
+        band_dictionary=band_dictionary,
+        download_dir=download_dir,
+        cert_path=cert_path,
+        max_workers=min(16, num_threads * 2),
+    )
+    fetch_expected_sizes_end = time.time()
+    logger.info(
+        f'Fetched expected file sizes in {fetch_expected_sizes_end - fetch_expected_sizes_start:.1f} seconds'
+    )
+
+    # Set up progress tracker
+    progress_tracker = ProgressTracker()
+    for tile, band in tiles_to_download:
+        specs = tile_band_specs(tile, band_dictionary, band, download_dir)
+        job = DownloadJob(
+            tile=tile,
+            band=band,
+            final_path=specs['final_path'],
+            temp_path=specs['temp_path'],
+            expected_size=expected_sizes.get(specs['final_path'], 0),
+        )
+        progress_tracker.add_job(job)
+
     # Add all download jobs to queue
     for tile, band in tiles_to_download:
         download_queue.put((tile, band))
@@ -556,6 +765,15 @@ def download_tiles(
 
     # Split catalog by tile for cutout processing
     tile_catalogs = split_by_tile(catalog, list(tile_progress.keys()))
+
+    # Start progress monitor thread
+    monitor_thread = threading.Thread(
+        target=progress_monitor,
+        args=(progress_tracker, shutdown_flag),
+        name='ProgressMonitor',
+        daemon=True,
+    )
+    monitor_thread.start()
 
     # Start worker threads
     threads = []
@@ -580,6 +798,8 @@ def download_tiles(
                 cutout_futures,
                 cutout_futures_lock,
                 tiles_claimed_for_cutout,
+                progress_tracker,
+                expected_sizes,
             ),
             name=f'DownloadWorker-{i}',
         )
@@ -628,6 +848,9 @@ def download_tiles(
         # Signal workers to shutdown
         logger.debug('Signaling workers to shut down...')
         shutdown_flag.set()
+
+        # Wait for monitor thread to finish (for clean progress bar closure)
+        monitor_thread.join(timeout=2)
 
         # Send sentinel values to wake up workers
         for _ in range(num_threads):

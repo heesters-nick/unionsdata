@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - retry logic for downloads
 - plotting routine for cutouts (unionsdata plot)
 - integrate config validation into unionsdata edit and remove unionsdata validate
+- download progress bar
 
 ## [0.1.1] - 2025-10-31
 
