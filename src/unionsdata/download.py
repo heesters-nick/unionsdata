@@ -17,7 +17,15 @@ from typing import TypedDict
 import numpy as np
 import pandas as pd
 import requests
-from tqdm import tqdm
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 
 from unionsdata.config import BandDict, CutoutsCfg
 from unionsdata.cutouts import create_cutouts_for_tile
@@ -141,7 +149,7 @@ def fetch_expected_sizes(
                 pass
 
     total_size = sum(path_to_size.values())
-    logger.info(f'Total expected download size: {total_size / (1024**3):.2f} GB')
+    logger.debug(f'Total expected download size: {total_size / (1024**3):.2f} GB')
 
     return path_to_size
 
@@ -149,46 +157,46 @@ def fetch_expected_sizes(
 def progress_monitor(
     tracker: ProgressTracker,
     shutdown_flag: Event,
-    update_interval: float = 0.5,
+    update_interval: float = 0.1,
 ) -> None:
     """Monitor thread that updates progress bar based on file sizes."""
-    # Wait briefly for jobs to be populated and downloads to start
+    # Wait briefly for jobs to be populated
     time.sleep(1.0)
 
-    _, total_bytes = tracker.get_totals()
-    if total_bytes == 0:
-        logger.warning('Could not determine expected download size, progress bar disabled')
+    current_start, total_bytes = tracker.get_totals()
+
+    # Already completed or no progress to show
+    if total_bytes == 0 or total_bytes >= current_start:
         return
 
-    with tqdm(
-        total=total_bytes,
-        unit='B',
-        unit_scale=True,
-        unit_divisor=1024,
-        desc='Downloading',
-        dynamic_ncols=True,
-        miniters=1,
-        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{rate_fmt}, {elapsed}<{remaining}]',
-    ) as pbar:
-        last_bytes = 0
+    # Create the Rich Progress Bar
+    with Progress(
+        SpinnerColumn(),
+        TextColumn('[bold blue]{task.description}'),
+        BarColumn(bar_width=None),
+        TextColumn('[progress.percentage]{task.percentage:>3.0f}%'),
+        '•',
+        DownloadColumn(),
+        '•',
+        TransferSpeedColumn(),
+        '•',
+        TimeRemainingColumn(),
+        transient=False,
+    ) as progress:
+        # Add task
+        task_id = progress.add_task('Downloading', total=total_bytes)
 
         while not shutdown_flag.is_set():
             current_bytes, _ = tracker.get_totals()
-            delta = current_bytes - last_bytes
 
-            if delta > 0:
-                pbar.update(delta)
-                last_bytes = current_bytes
-
-            if current_bytes >= total_bytes:
-                break
+            # Update with absolute value (no delta needed)
+            progress.update(task_id, completed=current_bytes)
 
             time.sleep(update_interval)
 
         # Final update
         current_bytes, _ = tracker.get_totals()
-        if current_bytes > last_bytes:
-            pbar.update(current_bytes - last_bytes)
+        progress.update(task_id, completed=current_bytes)
 
 
 # ========= Download Functions ==========
@@ -315,7 +323,9 @@ def download_tile_one_band(
 
     if final_path.is_file():
         if verify_download(final_path, expected_file_size):
-            logger.info(f'File {tile_fitsname} already downloaded and verified for band {band}.')
+            logger.info(
+                f'Tile {tile_str(tile_numbers)} already downloaded and verified for band {band}.'
+            )
             return True
         else:
             logger.warning(f'File {tile_fitsname} exists but failed verification, re-downloading.')
@@ -328,7 +338,7 @@ def download_tile_one_band(
                     f'Download attempt {attempt}/{max_retries} for tile {tile_fitsname} in band {band}...'
                 )
             else:
-                logger.info(f'Downloading {tile_fitsname} for band {band}...')
+                logger.info(f'Downloading tile {tile_str(tile_numbers)} for band {band}...')
 
             start_time = time.time()
 
@@ -713,7 +723,7 @@ def download_tiles(
             initializer=worker_log_init,
             initargs=(log_dir, log_name, log_level),
         )
-        logger.info(f'Started ProcessPoolExecutor with {num_cutout_workers} workers')
+        logger.debug(f'Started ProcessPoolExecutor with {num_cutout_workers} workers')
 
     # Signal handler for graceful shutdown
     def signal_handler(signum: int, frame: FrameType | None) -> None:
@@ -733,7 +743,7 @@ def download_tiles(
         max_workers=min(16, num_threads * 2),
     )
     fetch_expected_sizes_end = time.time()
-    logger.info(
+    logger.debug(
         f'Fetched expected file sizes in {fetch_expected_sizes_end - fetch_expected_sizes_start:.1f} seconds'
     )
 
@@ -760,8 +770,8 @@ def download_tiles(
     )
 
     bands_with_jobs = {band for _, band in tiles_to_download}
-    logger.info(f'Bands with download jobs: {sorted(bands_with_jobs)}')
-    logger.info(f'Requested bands: {sorted(requested_bands)}')
+    logger.debug(f'Bands with download jobs: {sorted(bands_with_jobs)}')
+    logger.debug(f'Requested bands: {sorted(requested_bands)}')
 
     # Split catalog by tile for cutout processing
     tile_catalogs = split_by_tile(catalog, list(tile_progress.keys()))
@@ -823,7 +833,7 @@ def download_tiles(
                 break
 
         if not shutdown_flag.is_set():
-            logger.info('All download jobs completed')
+            logger.info('All download jobs completed.')
 
         for tile_key, downloaded_bands in tile_progress.items():
             if requested_bands.issubset(downloaded_bands):

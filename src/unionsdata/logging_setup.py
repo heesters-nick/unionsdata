@@ -1,7 +1,10 @@
 import logging
+import sys
 from pathlib import Path
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler
+from rich.logging import RichHandler
+from tqdm import tqdm
 
 
 def setup_logger(
@@ -19,7 +22,7 @@ def setup_logger(
 
     # Create formatters
     file_formatter = logging.Formatter('%(asctime)s - ID %(process)d - %(levelname)s - %(message)s')
-    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    # console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # Filter redundant logging messages to decrease clutter
     log_filter = LoggingFilter()
@@ -35,16 +38,47 @@ def setup_logger(
     file_handler.addFilter(log_filter)
 
     # Set up console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(console_formatter)
+    # console_handler = TqdmLoggingHandler()
+    console_handler = RichHandler(
+        rich_tracebacks=True, show_time=False, show_level=True, show_path=False, markup=True
+    )
+    # console_handler.setFormatter(console_formatter)
     console_handler.addFilter(log_filter)
 
     # Configure root logger
+    # logging.basicConfig(
+    #     level=logging_level,
+    #     handlers=[file_handler, console_handler],
+    #     force=force,  # Overwrite any existing logging configuration
+    # )
     logging.basicConfig(
         level=logging_level,
+        format='%(message)s',
+        datefmt='[%X]',
         handlers=[file_handler, console_handler],
-        force=force,  # Overwrite any existing logging configuration
+        force=force,
     )
+
+
+class TqdmLoggingHandler(logging.Handler):
+    """
+    A custom logging handler that uses tqdm.write() to print logs.
+    This allows log messages to be printed 'above' the active progress bar
+    instead of overwriting it or causing visual glitches.
+    """
+
+    def __init__(self, level: int = logging.NOTSET):
+        super().__init__(level)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            # Use tqdm.write to print safely.
+            # We write to stderr to match standard logging behavior.
+            tqdm.write(msg, file=sys.stderr)
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 
 class LoggingFilter(logging.Filter):

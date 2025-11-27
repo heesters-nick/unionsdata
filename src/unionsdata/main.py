@@ -12,6 +12,7 @@ from typing import cast
 
 import numpy as np
 import yaml
+from rich.logging import RichHandler
 
 from unionsdata.config import (
     BandDict,
@@ -111,7 +112,7 @@ def run_download(args: argparse.Namespace) -> None:
         force=True,
     )
 
-    logger.info('Starting UNIONS data download')
+    logger.debug('Starting UNIONS data download...')
 
     cfg_dict = settings_to_dict(cfg)
 
@@ -191,7 +192,7 @@ def run_download(args: argparse.Namespace) -> None:
         logger.info(f'Requiring any of the specified bands: {bands}')
         for band in bands:
             band_tiles = availability.band_tiles(band)
-            logger.info(f'  {band}: {len(band_tiles)} tiles available')
+            logger.debug(f'  {band}: {len(band_tiles)} tiles available')
             for tile in band_tiles:
                 download_jobs.append((tile, band))
 
@@ -402,11 +403,6 @@ def run_plot(args: argparse.Namespace) -> None:
     cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
     logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
-    # all_band_dict: dict[str, BandDict] = {
-    #     k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
-    #     for k in cfg.bands.keys()  # ALL bands, not just cfg.runtime.bands
-    # }
-
     # filter considered bands from the full band dictionary
     selected_band_dict: dict[str, BandDict] = {
         k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
@@ -460,7 +456,19 @@ def cli_entry() -> None:
     """
     The main CLI entry point that dispatches to subcommands.
     """
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s', force=True)
+
+    # Set up a basic logger for initial messages
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(message)s',
+        datefmt='[%X]',
+        handlers=[
+            RichHandler(
+                rich_tracebacks=True, show_time=False, show_level=True, show_path=False, markup=True
+            )
+        ],
+        force=True,
+    )
 
     parser = argparse.ArgumentParser(
         description='UNIONS data download tool.',

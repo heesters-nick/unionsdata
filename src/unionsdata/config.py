@@ -353,7 +353,7 @@ def load_settings(
         config_source=config_path,
     )
 
-    logger.info(f'Configuration loaded successfully for machine: {raw.machine}')
+    logger.debug(f'Configuration loaded successfully for machine: {raw.machine}')
 
     return settings
 

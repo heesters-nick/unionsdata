@@ -356,7 +356,6 @@ def test_run_download_integration_basic(
         run_download(args)
 
     # Assert - Check that expected steps occurred
-    assert 'Starting UNIONS data download' in caplog.text
     assert 'Total download jobs:' in caplog.text
 
     # Verify directory structure was created
