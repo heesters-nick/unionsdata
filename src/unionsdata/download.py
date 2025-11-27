@@ -284,7 +284,7 @@ def download_tile_one_band(
     cert_path: Path,
     max_retries: int,
     expected_file_size: int | None = None,
-) -> bool:
+) -> str:
     """
     Download a tile in a specific band.
 
@@ -303,7 +303,7 @@ def download_tile_one_band(
         expected_file_size: expected file size in bytes inferred from header
 
     Returns:
-        success/failure
+        'downloaded', 'skipped', or 'failed'
     """
     # Use pre-fetched expected size if available otherwise fetch it now
     if expected_file_size is None or expected_file_size == 0:
@@ -323,10 +323,10 @@ def download_tile_one_band(
 
     if final_path.is_file():
         if verify_download(final_path, expected_file_size):
-            logger.info(
+            logger.debug(
                 f'Tile {tile_str(tile_numbers)} already downloaded and verified for band {band}.'
             )
-            return True
+            return 'skipped'
         else:
             logger.warning(f'File {tile_fitsname} exists but failed verification, re-downloading.')
             final_path.unlink()
@@ -338,7 +338,7 @@ def download_tile_one_band(
                     f'Download attempt {attempt}/{max_retries} for tile {tile_fitsname} in band {band}...'
                 )
             else:
-                logger.info(f'Downloading tile {tile_str(tile_numbers)} for band {band}...')
+                logger.debug(f'Downloading tile {tile_str(tile_numbers)} for band {band}...')
 
             start_time = time.time()
 
@@ -359,7 +359,7 @@ def download_tile_one_band(
                         process.kill()
                     # Clean up temp file if it exists
                     cleanup_temp_file(temp_path)
-                    return False
+                    return 'failed'
                 time.sleep(0.1)
 
             # Check if process completed successfully
@@ -397,7 +397,7 @@ def download_tile_one_band(
                         logger.error(
                             f'Maximum retries reached for {tile_fitsname}. Download failed.'
                         )
-                        return False
+                        return 'failed'
 
             # Verify the download
             if not verify_download(final_path, expected_file_size):
@@ -409,30 +409,30 @@ def download_tile_one_band(
                     time.sleep(2**attempt)
                     continue
                 else:
-                    return False
+                    return 'failed'
 
-            logger.info(
+            logger.debug(
                 f'Successfully downloaded tile {tile_str(tile_numbers)} for band {band} in {np.round(time.time() - start_time, 1)} seconds.'
             )
-            return True
+            return 'downloaded'
 
         except subprocess.CalledProcessError as e:
-            logger.error(
+            logger.warning(
                 f'Failed downloading tile {tile_str(tile_numbers)} for band {band}. Retrying...'
             )
-            logger.error(f'Subprocess error details: {e}')
+            logger.warning(f'Subprocess error details: {e}')
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
 
             if shutdown_flag.is_set():
-                return False
+                return 'failed'
 
             if attempt < max_retries:
                 logger.warning('Download failed. Retrying...')
                 time.sleep(2**attempt)
                 continue
             else:
-                return False
+                return 'failed'
 
         except FileNotFoundError:
             logger.error(
@@ -441,7 +441,7 @@ def download_tile_one_band(
             logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
-            return False
+            return 'failed'
 
         except Exception as e:
             logger.error(
@@ -451,17 +451,17 @@ def download_tile_one_band(
             cleanup_temp_file(temp_path)
 
             if shutdown_flag.is_set():
-                return False
+                return 'failed'
 
             if attempt < max_retries:
                 logger.warning('Unexpected error. Retrying...')
                 time.sleep(2**attempt)
                 continue
             else:
-                return False
+                return 'failed'
 
     # Should never get to this point but just in case
-    return False
+    return 'failed'
 
 
 def download_worker(
@@ -484,6 +484,8 @@ def download_worker(
     tiles_claimed_for_cutout: set[str],
     progress_tracker: ProgressTracker,
     expected_sizes: dict[Path, int],
+    download_stats: dict[str, int],
+    stats_lock: threading.Lock,
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -508,6 +510,11 @@ def download_worker(
         tiles_claimed_for_cutout: Set to track tiles already submitted for cutouts
         progress_tracker: Shared ProgressTracker instance
         expected_sizes: Dictionary mapping final_path to expected file size
+        download_stats: Dictionary to track download statistics
+        stats_lock: Lock to synchronize access to download_stats
+
+    Returns:
+        None
     """
     worker_id = threading.get_ident()
     logger.debug(f'Download worker {worker_id} started')
@@ -538,7 +545,7 @@ def download_worker(
                 expected_size = expected_sizes.get(paths['final_path'], 0)
 
                 # Download the file
-                success = download_tile_one_band(
+                status = download_tile_one_band(
                     tile_numbers=tile,
                     tile_fitsname=paths['fitsfilename'],
                     final_path=paths['final_path'],
@@ -553,7 +560,11 @@ def download_worker(
                     expected_file_size=expected_size if expected_size > 0 else None,
                 )
 
-                if success:
+                # Update shared stats safely
+                with stats_lock:
+                    download_stats[status] = download_stats.get(status, 0) + 1
+
+                if status in ['downloaded', 'skipped']:
                     downloads_completed += 1
 
                     # Mark as completed in progress tracker
@@ -579,11 +590,11 @@ def download_worker(
 
                     if tile_complete:
                         if not remaining_bands_total:
-                            logger.info(
+                            logger.debug(
                                 f'✓ Tile {tile_str_key} COMPLETE in all requested bands: {sorted(tile_bands)}'
                             )
                         else:
-                            logger.info(
+                            logger.debug(
                                 f'✓ Tile {tile_str_key} COMPLETE in all available bands: {sorted(tile_bands)}; missing band(s): {sorted(remaining_bands_total)}'
                             )
 
@@ -631,7 +642,7 @@ def download_worker(
                                     )
 
                     else:
-                        logger.info(
+                        logger.debug(
                             f'  Tile {tile_str_key} progress: {sorted(tile_bands)}, remaining: {sorted(remaining_bands_jobs)}'
                         )
 
@@ -699,6 +710,8 @@ def download_tiles(
 
     # Create queue and threading objects
     download_queue: Queue[tuple[tuple[int, int] | None, str | None]] = Queue()
+    download_stats = {'downloaded': 0, 'skipped': 0, 'failed': 0}
+    stats_lock = threading.Lock()
     shutdown_flag = Event()
 
     # Shared dictionary to track download progress per tile
@@ -765,9 +778,7 @@ def download_tiles(
         download_queue.put((tile, band))
 
     total_jobs = len(tiles_to_download)
-    logger.info(
-        f'Starting download of {total_jobs} tile-band combinations using {num_threads} threads'
-    )
+    logger.info(f'Start processing {total_jobs} tile-band combinations...')
 
     bands_with_jobs = {band for _, band in tiles_to_download}
     logger.debug(f'Bands with download jobs: {sorted(bands_with_jobs)}')
@@ -810,6 +821,8 @@ def download_tiles(
                 tiles_claimed_for_cutout,
                 progress_tracker,
                 expected_sizes,
+                download_stats,
+                stats_lock,
             ),
             name=f'DownloadWorker-{i}',
         )
@@ -833,7 +846,7 @@ def download_tiles(
                 break
 
         if not shutdown_flag.is_set():
-            logger.info('All download jobs completed.')
+            logger.debug('All download jobs completed.')
 
         for tile_key, downloaded_bands in tile_progress.items():
             if requested_bands.issubset(downloaded_bands):
@@ -878,11 +891,19 @@ def download_tiles(
         failed_jobs = total_jobs - completed_jobs
 
         logger.info('=' * 70)
-        logger.info('DOWNLOAD SUMMARY:')
-        logger.info(f'  {len(complete_tiles)} tiles downloaded in all requested bands.')
-        logger.info(f'  {completed_jobs}/{total_jobs} jobs completed.')
-        logger.info(f'  {failed_jobs} jobs failed.')
-        logger.info('=' * 70)
+        logger.info('⬇️  DOWNLOAD SUMMARY:')
+        logger.info(f'  Total jobs processed: {total_jobs}')
+        logger.info(f'  ✨ Freshly downloaded: {download_stats["downloaded"]}')
+        logger.info(f'  ⏭️  Already existed:    {download_stats["skipped"]}')
+
+        if download_stats['failed'] > 0:
+            logger.error(f'  ❌ Failed:             {download_stats["failed"]}')
+            logger.warning("  ⚠️ Run again with '--resume' to retry failed files.")
+        else:
+            logger.info('  ✅ Failed:             0')
+
+        if cutout_executor is None:
+            logger.info('=' * 70)
 
         # Collect info about cutouts created
         tile_cutout_info: dict[str, list[str]] = {}
@@ -946,39 +967,41 @@ def download_tiles(
                                     parts.append(f'{n_skipped} skipped')
 
                                 msg = ', '.join(parts)
-                                logger.debug(f'✓ Cutouts for tile {tile_key}: {msg}')
+                                logger.debug(f'✅ Cutouts for tile {tile_key}: {msg}')
                             else:
                                 logger.warning(
-                                    f'⚠ Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
+                                    f' Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
                                 )
                         except TimeoutError:
                             cutouts_failed += 1
                             failed_tiles.append(tile_key)
-                            logger.error(f'✗ Cutouts timed out for tile {tile_key} (>300s)')
+                            logger.error(f'❌ Cutouts timed out for tile {tile_key} (>300s)')
                         except Exception as e:
                             cutouts_failed += 1
                             failed_tiles.append(tile_key)
                             logger.error(
-                                f'✗ Cutouts failed for tile {tile_key}: {e}', exc_info=True
+                                f'❌ Cutouts failed for tile {tile_key}: {e}', exc_info=True
                             )
 
-                logger.info('CUTOUT SUMMARY')
-                logger.info(f'  Total tiles processed: {n_cutout_jobs}')
-                logger.info(f'  Successful: {n_cutout_jobs - cutouts_failed}')
-                logger.info(f'  Failed: {cutouts_failed}')
-                logger.info(
-                    f'  Total objects: {cutouts_new + cutouts_skipped + cutouts_updated + cutouts_failed}'
-                )
-                logger.info(f'  Total cutouts created: {cutouts_new}')
-                logger.info(f'  Cutouts skipped (already exist): {cutouts_skipped}')
-                logger.info(f'  Cutouts updated (new bands): {cutouts_updated}')
+                logger.info('=' * 70)
+                logger.info('✂️  CUTOUT SUMMARY:')
+                total_objects = cutouts_new + cutouts_skipped + cutouts_updated + cutouts_failed
+                logger.info(f'  Total objects: {total_objects}')
+                logger.info(f'  ✨ New cutouts: {cutouts_new}')
+                logger.info(f'  ⏭️  Skipped (already exist): {cutouts_skipped}')
+                logger.info(f'  🔄 Updated (new bands): {cutouts_updated}')
+
+                if cutouts_failed > 0:
+                    logger.info(f'  ❌ Failed cutouts: {cutouts_failed}')
+                else:
+                    logger.info('  ✅ Failed cutouts: 0')
 
                 if failed_tiles:
-                    logger.warning(f'  Failed tiles: {", ".join(failed_tiles)}')
+                    logger.warning(f'  ⚠️ Failed tiles: {", ".join(failed_tiles)}')
 
                 logger.info('=' * 70)
             else:
-                logger.info('No cutout jobs were submitted')
+                logger.info('No cutout jobs were submitted.')
                 cutout_executor.shutdown(wait=False)
 
         # cleanup_temp_files(download_dir)
