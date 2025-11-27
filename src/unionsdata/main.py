@@ -16,6 +16,7 @@ import yaml
 from unionsdata.config import (
     BandDict,
     ensure_runtime_dirs,
+    get_config_path,
     get_user_config_dir,
     load_settings,
     purge_previous_run,
@@ -309,15 +310,19 @@ def run_init(args: argparse.Namespace) -> None:
 
 def run_edit(args: argparse.Namespace) -> None:
     """
-    Open the user configuration file in the system's default editor.
-    Validates the configuration immediately after the editor closes.
+    Open the configuration file in the system's default editor. This is only relevant for pip installs.
+    Always targets user config (unless --config is used) and validates after editing.
     """
 
-    user_config_path = get_user_config_dir() / 'config.yaml'
-
-    if not user_config_path.exists():
-        logger.error(f'No config file found at: {user_config_path}')
-        logger.info("Please run 'unionsdata init' first.")
+    # Resolve config path. Force is_editable=False to target user config (pip install mode).
+    try:
+        user_config_path = get_config_path(is_editable=False, config_path=args.config)
+    except FileNotFoundError:
+        if args.config:
+            logger.error(f'Config file not found at: {args.config}')
+        else:
+            logger.error('No config file found.')
+            logger.info("Please run 'unionsdata init' first.")
         sys.exit(1)
 
     # Get the system's default editor
@@ -340,16 +345,14 @@ def run_edit(args: argparse.Namespace) -> None:
         # Validate the config immediately after closing editor
         logger.info('Validating configuration...')
         try:
-            # Try loading the settings - this runs all Pydantic validators
+            # Validate the specific file we just edited by loading it
             _ = load_settings(config_path=user_config_path, check_first_run=False)
             logger.info('✓ Configuration is valid!')
-            break  # Exit the loop if valid
+            break
 
         except Exception as e:
-            # Print the validation error clearly
             logger.error(f'✗ Config validation failed:\n{e}')
 
-            # Simple interactive loop to ask user if they want to re-edit
             try:
                 response = (
                     input('\nWould you like to re-open the editor to fix this? [Y/n]: ')
@@ -363,17 +366,6 @@ def run_edit(args: argparse.Namespace) -> None:
             if response not in ('', 'y', 'yes'):
                 logger.warning('Exiting with invalid configuration.')
                 sys.exit(1)
-
-
-def run_validate(args: argparse.Namespace) -> None:
-    """Validate the configuration file."""
-
-    try:
-        _ = load_settings(config_path=args.config, check_first_run=False)
-        logger.info('✓ Config is valid!')
-    except Exception as e:
-        logger.error(f'✗ Config validation failed: {e}')
-        sys.exit(1)
 
 
 def run_plot(args: argparse.Namespace) -> None:
@@ -501,10 +493,6 @@ def cli_entry() -> None:
         'edit', help='Open the user config file in your default editor'
     )
     parser_edit.set_defaults(func=run_edit)
-
-    # --- 'validate' subcommand ---
-    parser_validate = subparsers.add_parser('validate', help='Check if config is valid')
-    parser_validate.set_defaults(func=run_validate)
 
     # --- 'download' subcommand ---
     parser_download = subparsers.add_parser(
