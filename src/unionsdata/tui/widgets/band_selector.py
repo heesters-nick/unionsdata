@@ -10,7 +10,6 @@ from textual.widgets import Static
 
 from unionsdata.tui.widgets.better_checkbox import BetterCheckbox
 
-
 # Band definitions with display names
 AVAILABLE_BANDS: list[tuple[str, str, str]] = [
     ('cfis-u', 'u', 'CFIS u-band'),
@@ -145,9 +144,7 @@ class BandSelector(Static):
         error_widget = self.query_one('#band-validation-error', Static)
 
         if len(self.selected_bands) < self._min_selected:
-            error_widget.update(
-                f'⚠ At least {self._min_selected} band(s) must be selected'
-            )
+            error_widget.update(f'⚠ At least {self._min_selected} band(s) must be selected')
         else:
             error_widget.update('')
 
