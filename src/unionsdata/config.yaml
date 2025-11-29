@@ -16,7 +16,7 @@ logging:
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["whigs-g", 'cfis-r', 'ps-i']                       # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ["whigs-g", 'cfis-r', 'ps-i']                             # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 

@@ -1,0 +1,293 @@
+/* Main application styles for the configuration editor */
+
+/* Screen layout */
+Screen {
+    layout: vertical;
+}
+
+/* Header styling */
+#app-header {
+    dock: top;
+    height: 3;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    padding: 1;
+}
+
+#app-header .unsaved-indicator {
+    color: $warning;
+    text-style: bold;
+}
+
+/* Tab content area */
+TabbedContent {
+    height: 1fr;
+}
+
+ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 1 2;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+/* Section titles within tabs */
+.section-title {
+    background: $primary-darken-2;
+    color: $text;
+    padding: 0 1;
+    margin: 1 0;
+    text-style: bold;
+    width: 100%;
+}
+
+/* Field rows - horizontal layout with label and input */
+.field-row {
+    height: auto;
+    min-height: 3;
+    margin: 0 0 1 0;
+    layout: horizontal;
+    align: left middle;
+}
+
+.field-label {
+    width: 25;
+    text-align: left;
+    padding-right: 1;
+}
+
+.field-input {
+    width: 1fr;
+    max-width: 50;
+}
+
+.field-input-wide {
+    width: 1fr;
+}
+
+/* Checkbox specific styling */
+.field-checkbox {
+    width: auto;
+}
+
+/* Select dropdown styling */
+Select {
+    width: 30;
+}
+
+/* Input styling */
+Input {
+    width: 100%;
+}
+
+/* Force RA and Dec inputs to split the width 50/50 */
+CoordinateList Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+/* Ensure PathInput widgets share space with labels correctly */
+.field-row PathInput {
+    width: 1fr;
+}
+
+Input.-valid {
+    border: tall $success;
+}
+
+Input.-invalid {
+    border: tall $error;
+}
+
+/* Help text below fields */
+.help-text {
+    color: $text-muted;
+    text-style: italic;
+    margin-left: 26;
+    height: 1;
+}
+
+/* Subsection container */
+.subsection {
+    margin: 1 0;
+    padding: 1;
+    border: solid $primary-darken-1;
+}
+
+.subsection-title {
+    color: $primary-lighten-2;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* Dynamic visibility for input source sections */
+.hidden {
+    display: none;
+}
+
+/* Input source specific containers */
+#tiles-input-section,
+#coordinates-input-section,
+#dataframe-input-section {
+    margin-top: 1;
+    padding: 1;
+    border: solid $secondary;
+    height: auto;
+}
+
+/* Ensure TileList and CoordinateList expand properly for scrolling */
+TileList, CoordinateList {
+    height: auto;
+}
+
+/* Button bar at bottom */
+#button-bar {
+    height: auto;
+    margin-bottom: 1;
+    padding: 0 2;
+    background: $surface;
+    border-top: solid $primary;
+    layout: horizontal;
+    align: center middle;
+}
+
+#button-bar Button {
+    margin: 0 1;
+    min-width: 16;
+}
+
+/* Footer styling */
+Footer {
+    background: $primary-darken-3;
+}
+
+/* Notification styling */
+Toast {
+    margin: 1 2;
+}
+
+/* Scrollable content */
+.scrollable-content {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+/* Validation summary */
+#validation-summary {
+    height: auto;
+    padding: 1;
+    margin: 1 0;
+    border: solid $warning;
+    display: none;
+}
+
+#validation-summary.has-errors {
+    display: block;
+    border: solid $error;
+}
+
+#validation-summary .error-item {
+    color: $error;
+    margin-left: 2;
+}
+
+/* Machine-specific paths container */
+#paths-container {
+    height: auto;
+}
+
+/* RGB configuration subsection */
+.rgb-config {
+    margin-top: 1;
+    padding: 1;
+    border: dashed $secondary;
+}
+
+/* Column mappings for dataframe */
+.column-mappings {
+    margin-top: 1;
+}
+
+.column-mappings .field-row {
+    margin-left: 2;
+}
+
+/* Confirmation dialog */
+ConfirmDialog {
+    align: center middle;
+}
+
+ConfirmDialog > Vertical {
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+    width: 60;
+    height: auto;
+}
+
+ConfirmDialog .dialog-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+ConfirmDialog .dialog-message {
+    margin-bottom: 2;
+}
+
+ConfirmDialog .dialog-buttons {
+    layout: horizontal;
+    align: center middle;
+    height: 3;
+}
+
+ConfirmDialog .dialog-buttons Button {
+    margin: 0 1;
+}
+
+/* Loading indicator */
+#loading-indicator {
+    dock: top;
+    height: 1;
+    background: $warning;
+    color: $text;
+    text-align: center;
+    display: none;
+}
+
+#loading-indicator.loading {
+    display: block;
+}
+
+/* Collapsible sections */
+Collapsible {
+    margin: 1 0;
+}
+
+CollapsibleTitle {
+    background: $primary-darken-1;
+    padding: 0 1;
+}
+
+/* Plotting configuration */
+.plotting-bands {
+    margin: 1 0;
+}
+
+/* Band constraint info */
+.band-constraint-info {
+    color: $text-muted;
+    margin-left: 26;
+}
+
+/* Band selection widget */
+#band-selector {
+    layout: vertical;
+    height: auto;
+    margin: 1 2;
+    border: solid $secondary;
+    padding: 1;
+}

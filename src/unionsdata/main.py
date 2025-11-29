@@ -26,6 +26,7 @@ from unionsdata.config import (
 from unionsdata.download import download_tiles
 from unionsdata.logging_setup import setup_logger
 from unionsdata.plotting import cutouts_to_rgb, load_cutouts, plot_cutouts
+from unionsdata.tui import run_config_editor
 from unionsdata.utils import (
     TileAvailability,
     input_to_tile_list,
@@ -369,6 +370,17 @@ def run_edit(args: argparse.Namespace) -> None:
                 sys.exit(1)
 
 
+def run_config(args: argparse.Namespace) -> None:
+    """
+    Launch the interactive TUI configuration editor.
+
+    This provides a user-friendly interface for editing the configuration file
+    with dropdowns, checkboxes, and real-time validation.
+    """
+    config_path = args.config if hasattr(args, 'config') and args.config else None
+    run_config_editor(config_path=config_path)
+
+
 def run_plot(args: argparse.Namespace) -> None:
     """Plot RGB object cutouts from input dataframe or coordinates.
     Uses configuration from config.yaml plotting section."""
@@ -501,6 +513,13 @@ def cli_entry() -> None:
         'edit', help='Open the user config file in your default editor'
     )
     parser_edit.set_defaults(func=run_edit)
+
+    # --- 'config' subcommand ---
+    parser_config = subparsers.add_parser(
+        'config',
+        help='Open the interactive TUI configuration editor (recommended)',
+    )
+    parser_config.set_defaults(func=run_config)
 
     # --- 'download' subcommand ---
     parser_download = subparsers.add_parser(
