@@ -59,7 +59,9 @@ TabPane {
     width: 25;
     text-align: left;
     padding-right: 1;
-    height: auto;
+    height: 100%;
+    content-align: left middle;
+    align: left middle;
 }
 
 .field-input {
@@ -74,6 +76,8 @@ TabPane {
 /* Checkbox specific styling */
 .field-checkbox {
     width: auto;
+    height: 100%;
+    content-align: left middle;
 }
 
 /* Select dropdown styling */
