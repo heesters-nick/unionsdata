@@ -43,6 +43,7 @@ TabPane {
     margin: 1 0;
     text-style: bold;
     width: 100%;
+    height: auto;
 }
 
 /* Field rows - horizontal layout with label and input */
@@ -58,6 +59,7 @@ TabPane {
     width: 25;
     text-align: left;
     padding-right: 1;
+    height: auto;
 }
 
 .field-input {

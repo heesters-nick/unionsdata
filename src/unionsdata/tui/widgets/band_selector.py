@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Container, Vertical
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Static
+from textual.widgets import Label, Static
 
 from unionsdata.tui.widgets.better_checkbox import BetterCheckbox
 
@@ -32,27 +32,55 @@ class BandSelector(Static):
     DEFAULT_CSS = """
     BandSelector {
         height: auto;
+        border: solid $primary;
+        background: $surface;
         padding: 0 1;
+        margin: 1 2;
     }
 
     BandSelector .band-grid {
         height: auto;
         layout: grid;
-        grid-size: 2;
-        grid-gutter: 0 2;
-        padding: 0;
+        grid-size: 9;
+        grid-columns: 1fr 1 1fr 1 1fr 1 1fr 1 1fr;
+        grid-gutter: 0;
+        margin-top: 1;
+    }
+
+    BandSelector .band-column {
+        height: 100%;
+        padding: 0 1;
+    }
+
+    /* Changed from background (block) to border (thin line) */
+    BandSelector .separator {
+        width: 1;
+        height: 100%;
+        border-left: solid $primary-darken-2;
+    }
+
+    BandSelector .header-label {
+        text-align: center;
+        text-style: bold;
+        background: $primary-darken-2;
+        color: $text;
+        padding: 0 1;
+        margin-bottom: 1;
+        width: 100%;
     }
 
     BandSelector .band-checkbox {
         height: 1;
+        width: 100%;
         padding: 0;
-        margin: 0;
+        margin-bottom: 1;
     }
 
     BandSelector .validation-error {
         color: $error;
         height: 1;
         margin-top: 1;
+        text-align: center;
     }
     """
 
@@ -92,17 +120,50 @@ class BandSelector(Static):
         self._min_selected = min_selected
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes='band-grid'):
-            for band_id, short_name, description in AVAILABLE_BANDS:
-                is_checked = band_id in self._initial_selected
-                # Create a safe ID by replacing hyphens and underscores
-                safe_id = band_id.replace('-', '_').replace('.', '_')
-                yield BetterCheckbox(
-                    f'{short_name}: {description}',
-                    is_checked,
-                    id=f'band_{safe_id}',
-                    classes='band-checkbox',
-                )
+        # Group bands by wavelength (generic band char)
+        bands_by_wave: dict[str, list[tuple[str, str, str]]] = {
+            'u': [],
+            'g': [],
+            'r': [],
+            'i': [],
+            'z': [],
+        }
+
+        for band in AVAILABLE_BANDS:
+            # band[1] is short name like 'u', 'r', 'r (LSB)'
+            # We take the first character to group them
+            generic = band[1][0].lower()
+            if generic in bands_by_wave:
+                bands_by_wave[generic].append(band)
+
+        # Use a Container with grid layout
+        with Container(classes='band-grid'):
+            waves = ['u', 'g', 'r', 'i', 'z']
+            for i, wave in enumerate(waves):
+                # 1. The Band Column (width=1fr)
+                with Vertical(classes='band-column'):
+                    # Column Header
+                    yield Label(wave.upper(), classes='header-label')
+
+                    # Checkboxes
+                    for band_id, _, description in bands_by_wave[wave]:
+                        is_checked = band_id in self._initial_selected
+                        safe_id = band_id.replace('-', '_').replace('.', '_')
+
+                        # Simplify label for column layout
+                        display_label = description.replace(f' {wave}-band', '')
+
+                        yield BetterCheckbox(
+                            display_label,
+                            is_checked,
+                            id=f'band_{safe_id}',
+                            classes='band-checkbox',
+                        )
+
+                # 2. The Separator (width=1), if not the last column
+                if i < len(waves) - 1:
+                    yield Static(classes='separator')
+
         yield Static('', classes='validation-error', id='band-validation-error')
 
     def on_mount(self) -> None:

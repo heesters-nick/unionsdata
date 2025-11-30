@@ -24,13 +24,21 @@ from textual.widgets import (
 )
 
 from unionsdata.tui.validators import IntegerRange, NonEmptyValidator
-from unionsdata.tui.widgets import BandSelector, BetterCheckbox, CoordinateList, PathInput, TileList
+from unionsdata.tui.widgets import (
+    BandSelector,
+    BetterCheckbox,
+    CoordinateList,
+    InfoIcon,
+    PathInput,
+    TileList,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # Type alias for input sources
 InputSource = Literal['all_available', 'tiles', 'coordinates', 'dataframe']
+ButtonVariant = Literal['default', 'primary', 'success', 'warning', 'error']
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -70,18 +78,31 @@ class ConfirmDialog(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, title: str, message: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        yes_label: str = 'Yes',
+        no_label: str = 'No',
+        yes_variant: ButtonVariant = 'error',
+        no_variant: ButtonVariant = 'primary',
+    ) -> None:
         super().__init__()
         self._title = title
         self._message = message
+        self._yes_label = yes_label
+        self._no_label = no_label
+        self._yes_variant: ButtonVariant = yes_variant
+        self._no_variant: ButtonVariant = no_variant
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static(self._title, classes='dialog-title')
             yield Static(self._message, classes='dialog-message')
             with Horizontal(classes='dialog-buttons'):
-                yield Button('Yes', variant='error', id='confirm-yes')
-                yield Button('No', variant='primary', id='confirm-no')
+                # ID mapping: yes -> True, no -> False
+                yield Button(self._yes_label, variant=self._yes_variant, id='confirm-yes')
+                yield Button(self._no_label, variant=self._no_variant, id='confirm-no')
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == 'confirm-yes':
@@ -99,8 +120,7 @@ class ConfigEditorApp(App[None]):
     CSS_PATH = 'styles/config_editor.tcss'
 
     BINDINGS = [
-        Binding('ctrl+s', 'save', 'Save', show=True),
-        Binding('ctrl+v', 'validate', 'Validate', show=True),
+        Binding('ctrl+s', 'save', 'Save & Quit', show=True),
         Binding('ctrl+q', 'quit_app', 'Quit', show=True),
         Binding('?', 'help', 'Help', show=True),
     ]
@@ -226,6 +246,9 @@ class ConfigEditorApp(App[None]):
             with TabPane('Cutouts', id='cutouts-tab'):
                 yield from self._compose_cutouts_tab()
 
+            with TabPane('Plotting', id='plotting-tab'):
+                yield from self._compose_plotting_tab()
+
             with TabPane('Inputs', id='inputs-tab'):
                 yield from self._compose_inputs_tab()
 
@@ -233,8 +256,7 @@ class ConfigEditorApp(App[None]):
                 yield from self._compose_paths_tab()
 
         with Horizontal(id='button-bar'):
-            yield Button('💾 Save', variant='primary', id='save-btn')
-            yield Button('✓ Validate', variant='success', id='validate-btn')
+            yield Button('💾 Save & Quit', variant='primary', id='save-btn')
             yield Button('✗ Cancel', variant='error', id='cancel-btn')
 
         yield Footer()
@@ -337,11 +359,9 @@ class ConfigEditorApp(App[None]):
         runtime = self._config_data.get('runtime', {})
 
         with ScrollableContainer():
-            yield Static('Band Selection', classes='section-title')
-            yield Static(
-                'Select bands to download (at least one required):',
-                classes='help-text',
-            )
+            with Horizontal(classes='section-title'):
+                yield Label('Band Selection')
+                yield InfoIcon('Select bands to download (at least one required)')
 
             # BandSelector moved here
             yield BandSelector(
@@ -379,17 +399,18 @@ class ConfigEditorApp(App[None]):
 
             # Band constraint
             with Horizontal(classes='field-row'):
-                yield Label('Band Constraint:', classes='field-label')
+                with Horizontal(classes='field-label'):
+                    yield Label('Band Constraint')
+                    yield InfoIcon(
+                        'Minimum number of bands a tile must have to qualify for download'
+                    )
+                    yield Label(':')
                 yield Input(
                     value=str(tiles.get('band_constraint', 1)),
                     id='band-constraint',
                     classes='field-input',
                     validators=[IntegerRange(1, 7)],
                 )
-            yield Static(
-                'Minimum bands a tile must have to qualify for download',
-                classes='help-text',
-            )
 
             # Require all bands
             with Horizontal(classes='field-row'):
@@ -430,26 +451,204 @@ class ConfigEditorApp(App[None]):
 
             # Cutout size
             with Horizontal(classes='field-row'):
-                yield Label('Size (pixels):', classes='field-label')
+                with Horizontal(classes='field-label'):
+                    yield Label('Size (pixels)')
+                    yield InfoIcon('Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)')
+                    yield Label(':')
                 yield Input(
                     value=str(cutouts.get('size_pix', 512)),
                     id='cutout-size',
                     classes='field-input',
                     validators=[IntegerRange(1, 10000)],
                 )
-            yield Static(
-                'Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)',
-                classes='help-text',
-            )
 
             # Output subdirectory
             with Horizontal(classes='field-row'):
-                yield Label('Output Subdir:', classes='field-label')
+                with Horizontal(classes='field-label'):
+                    yield Label('Output Subdir')
+                    yield InfoIcon('Subdirectory for cutout output files')
+                    yield Label(':')
                 yield Input(
                     value=cutouts.get('output_subdir', 'cutouts'),
                     id='cutout-subdir',
                     classes='field-input',
                     validators=[NonEmptyValidator()],
+                )
+
+    def _compose_plotting_tab(self) -> ComposeResult:
+        """Compose the Plotting settings tab."""
+        plotting = self._config_data.get('plotting', {})
+        rgb = plotting.get('rgb', {})
+
+        with ScrollableContainer():
+            yield Static('Plotting Configuration', classes='section-title')
+
+            # Catalog name
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Catalog Name')
+                    yield InfoIcon('Name of catalog file (without _augmented.csv suffix)')
+                    yield Label(':')
+                yield Input(
+                    value=plotting.get('catalog_name', 'catalog'),
+                    id='plot-catalog-name',
+                    classes='field-input',
+                    validators=[NonEmptyValidator()],
+                )
+
+            # Plotting bands - comma separated
+            plot_bands = plotting.get('bands', ['whigs-g', 'cfis-r', 'ps-i'])
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('RGB Bands')
+                    yield InfoIcon('Three bands for RGB (e.g., whigs-g, cfis-r, ps-i)')
+                    yield Label(':')
+                yield Input(
+                    value=', '.join(plot_bands),
+                    id='plot-bands',
+                    classes='field-input',
+                    validators=[NonEmptyValidator()],
+                )
+
+            # Plot size
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Size (pixels)')
+                    yield InfoIcon('Square cutout size in pixels')
+                    yield Label(':')
+                yield Input(
+                    value=str(plotting.get('size_pix', 512)),
+                    id='plot-size',
+                    classes='field-input',
+                    validators=[IntegerRange(1, 10000)],
+                )
+
+            # Mode
+            mode = plotting.get('mode', 'grid')
+            modes = [('Grid', 'grid'), ('Channel', 'channel')]
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Display Mode')
+                    yield InfoIcon('grid: thumbnails; channel: show R,G,B separately')
+                    yield Label(':')
+                yield Select(
+                    modes,
+                    value=mode,
+                    id='plot-mode',
+                    classes='field-input',
+                )
+
+            # Max columns
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Max Columns')
+                    yield InfoIcon('Maximum columns in grid mode')
+                    yield Label(':')
+                yield Input(
+                    value=str(plotting.get('max_cols', 5)),
+                    id='plot-max-cols',
+                    classes='field-input',
+                    validators=[IntegerRange(1, 20)],
+                )
+
+            # Save plot
+            with Horizontal(classes='field-row'):
+                yield Label('Save Plot:', classes='field-label')
+                yield BetterCheckbox(
+                    'Save plot to disk',
+                    plotting.get('save_plot', True),
+                    id='plot-save-checkbox',
+                    classes='field-checkbox',
+                )
+
+            # Show plot
+            with Horizontal(classes='field-row'):
+                yield Label('Show Plot:', classes='field-label')
+                yield BetterCheckbox(
+                    'Display plot interactively',
+                    plotting.get('show_plot', False),
+                    id='plot-show-checkbox',
+                    classes='field-checkbox',
+                )
+
+            # Save name
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Save Filename')
+                    yield InfoIcon(
+                        'Filename template for saved plots\n'
+                        '{catalog_name} and {size_pix} placeholders available'
+                    )
+                    yield Label(':')
+                yield Input(
+                    value=plotting.get('save_name', '{catalog_name}_cutouts_{size_pix}.png'),
+                    id='plot-save-name',
+                    classes='field-input-wide',
+                )
+
+            yield Static('RGB Scaling', classes='section-title')
+
+            # Scaling type
+            scaling_type = rgb.get('scaling_type', 'asinh')
+            scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Scaling Type')
+                    yield InfoIcon('asinh preserves both bright and faint details')
+                    yield Label(':')
+                yield Select(
+                    scaling_types,
+                    value=scaling_type,
+                    id='rgb-scaling-type',
+                    classes='field-input',
+                )
+
+            # Stretch
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Stretch')
+                    yield InfoIcon('Scaling factor controlling overall brightness')
+                    yield Label(':')
+                yield Input(
+                    value=str(rgb.get('stretch', 125.0)),
+                    id='rgb-stretch',
+                    classes='field-input',
+                )
+
+            # Q
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Q')
+                    yield InfoIcon('Softening parameter for asinh (higher = more linear)')
+                    yield Label(':')
+                yield Input(
+                    value=str(rgb.get('Q', 7.0)),
+                    id='rgb-q',
+                    classes='field-input',
+                )
+
+            # Gamma
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Gamma')
+                    yield InfoIcon('Gamma correction (lower = enhances faint features)')
+                    yield Label(':')
+                yield Input(
+                    value=str(rgb.get('gamma', 0.25)),
+                    id='rgb-gamma',
+                    classes='field-input',
+                )
+
+            # Standard ZP
+            with Horizontal(classes='field-row'):
+                with Horizontal(classes='field-label'):
+                    yield Label('Standard ZP')
+                    yield InfoIcon('Standard zero-point for flux normalization')
+                    yield Label(':')
+                yield Input(
+                    value=str(rgb.get('standard_zp', 30.0)),
+                    id='rgb-standard-zp',
+                    classes='field-input',
                 )
 
     def _compose_inputs_tab(self) -> ComposeResult:
@@ -556,11 +755,9 @@ class ConfigEditorApp(App[None]):
         paths = self._config_data.get('paths_by_machine', {}).get(machine, {})
 
         with ScrollableContainer():
-            yield Static(f'Path Configuration (Machine: {machine})', classes='section-title')
-            yield Static(
-                'Note: Changing machine in General tab will reload these paths',
-                classes='help-text',
-            )
+            with Horizontal(classes='section-title'):
+                yield Label(f'Paths Configuration (Machine: {machine})')
+                yield InfoIcon('Changing machine in General tab will reload these paths')
 
             # Root directory main
             with Horizontal(classes='field-row'):
@@ -600,7 +797,12 @@ class ConfigEditorApp(App[None]):
 
             # Certificate path
             with Horizontal(classes='field-row'):
-                yield Label('Certificate Path:', classes='field-label')
+                with Horizontal(classes='field-label'):
+                    yield Label('Certificate Path')
+                    yield InfoIcon(
+                        'CADC proxy certificate\nGenerate with: cadc-get-cert -u USERNAME'
+                    )
+                    yield Label(':')
                 yield PathInput(
                     value=str(paths.get('cert_path', '')),
                     must_exist=True,
@@ -608,10 +810,6 @@ class ConfigEditorApp(App[None]):
                     is_certificate=True,
                     id='path-cert',
                 )
-            yield Static(
-                'CADC proxy certificate (generate with: cadc-get-cert -u USERNAME)',
-                classes='help-text',
-            )
 
     # ==================== Event Handlers ====================
 
@@ -646,8 +844,6 @@ class ConfigEditorApp(App[None]):
         """Handle button presses."""
         if event.button.id == 'save-btn':
             self.action_save()
-        elif event.button.id == 'validate-btn':
-            self.action_validate()
         elif event.button.id == 'cancel-btn':
             self.action_quit_app()
 
@@ -674,11 +870,21 @@ class ConfigEditorApp(App[None]):
     # ==================== Actions ====================
 
     def action_save(self) -> None:
-        """Save configuration to file."""
+        """Save configuration to file and quit if successful."""
         # Validate first
         errors = self._validate_config()
         if errors:
-            self.notify('\n'.join(errors[:3]), title='Validation Failed', severity='error')
+            self.push_screen(
+                ConfirmDialog(
+                    'Validation Failed',
+                    'Configuration has errors:\n\n• '
+                    + '\n• '.join(errors[:5])
+                    + '\n\nSave aborted. Return to editing?',
+                    yes_label='Discard & Quit',
+                    no_label='Back to Edit',
+                ),
+                self._handle_save_error_result,
+            )
             return
 
         # Collect values
@@ -693,22 +899,21 @@ class ConfigEditorApp(App[None]):
                 with open(self._config_path, 'w', encoding='utf-8') as f:
                     yaml.safe_dump(config_dict, f, sort_keys=False, default_flow_style=False)
 
-                self._dirty = False
-                self._config_data = config_dict
-                self._update_header()
                 self.notify(
                     f'Saved to {self._config_path}', title='Success', severity='information'
                 )
+                self.exit()
         except Exception as e:
             self.notify(str(e), title='Save Failed', severity='error')
 
-    def action_validate(self) -> None:
-        """Validate current configuration."""
-        errors = self._validate_config()
-        if errors:
-            self.notify('\n'.join(errors[:5]), title='Validation Errors', severity='error')
-        else:
-            self.notify('Configuration is valid!', title='✓ Valid', severity='information')
+    def _handle_save_error_result(self, quit: bool | None) -> None:
+        """Handle result of validation failure dialog.
+
+        Args:
+            quit: True if 'Discard & Quit' was clicked, False if 'Back to Edit'
+        """
+        if quit:
+            self.exit()
 
     def action_quit_app(self) -> None:
         """Quit the application, prompting if there are unsaved changes."""
@@ -734,8 +939,7 @@ class ConfigEditorApp(App[None]):
 UNIONS Data Configuration Editor
 
 Keyboard Shortcuts:
-  Ctrl+S  - Save configuration
-  Ctrl+V  - Validate configuration
+  Ctrl+S  - Save configuration and quit
   Ctrl+Q  - Quit
   Tab     - Next field
   Shift+Tab - Previous field
@@ -848,6 +1052,31 @@ Tips:
             'output_subdir': self._get_input_value('#cutout-subdir', 'cutouts'),
         }
 
+        # Plotting
+        plot_bands_str = self._get_input_value('#plot-bands', 'whigs-g, cfis-r, ps-i')
+        plot_bands = [b.strip() for b in plot_bands_str.split(',') if b.strip()]
+
+        config['plotting'] = {
+            'catalog_name': self._get_input_value('#plot-catalog-name', 'catalog'),
+            'bands': plot_bands,
+            'size_pix': int(self._get_input_value('#plot-size', '512')),
+            'mode': str(self.query_one('#plot-mode', Select).value),
+            'max_cols': int(self._get_input_value('#plot-max-cols', '5')),
+            'figsize': None,
+            'save_plot': self.query_one('#plot-save-checkbox', BetterCheckbox).value,
+            'show_plot': self.query_one('#plot-show-checkbox', BetterCheckbox).value,
+            'save_name': self._get_input_value(
+                '#plot-save-name', '{catalog_name}_cutouts_{size_pix}.png'
+            ),
+            'rgb': {
+                'scaling_type': str(self.query_one('#rgb-scaling-type', Select).value),
+                'stretch': float(self._get_input_value('#rgb-stretch', '125.0')),
+                'Q': float(self._get_input_value('#rgb-q', '7.0')),
+                'gamma': float(self._get_input_value('#rgb-gamma', '0.25')),
+                'standard_zp': float(self._get_input_value('#rgb-standard-zp', '30.0')),
+            },
+        }
+
         # Inputs
         source = str(self.query_one('#input-source-select', Select).value)
         config['inputs'] = {
@@ -921,6 +1150,12 @@ Tips:
                     errors.append(f'{name} must be between {min_val} and {max_val}')
             except ValueError:
                 errors.append(f'{name} must be a number')
+
+        # Validate plotting bands (should be exactly 3)
+        plot_bands_str = self._get_input_value('#plot-bands', '')
+        plot_bands = [b.strip() for b in plot_bands_str.split(',') if b.strip()]
+        if len(plot_bands) != 3:
+            errors.append('Plotting requires exactly 3 bands for RGB')
 
         # Validate paths
         cert_path = self.query_one('#path-cert', PathInput)
