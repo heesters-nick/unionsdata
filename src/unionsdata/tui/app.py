@@ -30,6 +30,7 @@ from unionsdata.tui.widgets import (
     CoordinateList,
     InfoIcon,
     PathInput,
+    RGBBandSelector,
     TileList,
 )
 
@@ -496,19 +497,19 @@ class ConfigEditorApp(App[None]):
                     validators=[NonEmptyValidator()],
                 )
 
-            # Plotting bands - comma separated
+            # RGB Band Selection
             plot_bands = plotting.get('bands', ['whigs-g', 'cfis-r', 'ps-i'])
+
             with Horizontal(classes='field-row'):
                 with Horizontal(classes='field-label'):
                     yield Label('RGB Bands')
-                    yield InfoIcon('Three bands for RGB (e.g., whigs-g, cfis-r, ps-i)')
+                    yield InfoIcon(
+                        'Select Short (Blue), Mid (Green), and Long (Red) wavelength bands'
+                    )
                     yield Label(':')
-                yield Input(
-                    value=', '.join(plot_bands),
-                    id='plot-bands',
-                    classes='field-input',
-                    validators=[NonEmptyValidator()],
-                )
+
+                # New Widget Integration
+                yield RGBBandSelector(selected_bands=plot_bands, id='rgb-band-selector')
 
             # Plot size
             with Horizontal(classes='field-row'):
@@ -862,6 +863,11 @@ class ConfigEditorApp(App[None]):
         self._dirty = True
         self._update_header()
 
+    def on_rgb_band_selector_changed(self, event: RGBBandSelector.Changed) -> None:
+        """Track RGB band selector changes."""
+        self._dirty = True
+        self._update_header()
+
     def on_path_input_changed(self, event: PathInput.Changed) -> None:
         """Track path input changes."""
         self._dirty = True
@@ -1053,8 +1059,9 @@ Tips:
         }
 
         # Plotting
-        plot_bands_str = self._get_input_value('#plot-bands', 'whigs-g, cfis-r, ps-i')
-        plot_bands = [b.strip() for b in plot_bands_str.split(',') if b.strip()]
+        plot_bands = self.query_one('#rgb-band-selector', RGBBandSelector).get_selected_bands()
+        if not plot_bands:
+            plot_bands = ['whigs-g', 'cfis-r', 'ps-i']
 
         config['plotting'] = {
             'catalog_name': self._get_input_value('#plot-catalog-name', 'catalog'),
@@ -1151,11 +1158,10 @@ Tips:
             except ValueError:
                 errors.append(f'{name} must be a number')
 
-        # Validate plotting bands (should be exactly 3)
-        plot_bands_str = self._get_input_value('#plot-bands', '')
-        plot_bands = [b.strip() for b in plot_bands_str.split(',') if b.strip()]
-        if len(plot_bands) != 3:
-            errors.append('Plotting requires exactly 3 bands for RGB')
+        # Validate plotting bands (should be exactly 3 in correct order)
+        rgb_selector = self.query_one('#rgb-band-selector', RGBBandSelector)
+        if not rgb_selector.is_complete():
+            errors.append('All three RGB bands must be selected for plotting')
 
         # Validate paths
         cert_path = self.query_one('#path-cert', PathInput)
