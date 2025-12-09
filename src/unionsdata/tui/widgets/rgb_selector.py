@@ -214,11 +214,18 @@ class RGBBandSelector(Static):
         # Rebuild UI
         for slot, prompt in slot_defs:
             wrapper = self.query_one(f'#wrap_{slot}', Vertical)
-            wrapper.remove_children()
 
-            # Mount fresh Select
-            new_sel: Select[str] = Select(all_opts, prompt=prompt, id=f'sel_{slot}')
-            wrapper.mount(new_sel)
+            # Check if we already have a Select widget (i.e. not locked)
+            if wrapper.query(Select):
+                # Just reset the value of the existing widget to avoid ID collision
+                wrapper.query_one(Select).value = Select.BLANK
+
+            else:
+                # We have a Label (locked), so remove it and mount a new Select
+                wrapper.remove_children()
+                # Mount fresh Select
+                new_sel: Select[str] = Select(all_opts, prompt=prompt, id=f'sel_{slot}')
+                wrapper.mount(new_sel)
 
         # Reset Logic
         self._update_options()
