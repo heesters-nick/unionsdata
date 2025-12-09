@@ -683,7 +683,7 @@ class ConfigEditorApp(App[None]):
                 id='tiles-input-section',
                 classes='' if current_source == 'tiles' else 'hidden',
             ):
-                yield Static('Tile Coordinates', classes='subsection-title')
+                yield Static('Tile Numbers', classes='subsection-title')
                 yield TileList(
                     tiles=cast(list[tuple[int, int]], initial_tiles),
                     id='tiles-list',
@@ -695,7 +695,7 @@ class ConfigEditorApp(App[None]):
                 id='coordinates-input-section',
                 classes='' if current_source == 'coordinates' else 'hidden',
             ):
-                yield Static('Sky Coordinates (RA/Dec)', classes='subsection-title')
+                yield Static(r'Sky Coordinates (RA/Dec) \[deg]', classes='subsection-title')
                 yield CoordinateList(
                     coordinates=cast(list[tuple[float, float]], initial_coords),
                     label1='RA',

@@ -159,7 +159,6 @@ class CoordinateList(Static):
     CoordinateList {
         height: auto;
         min-height: 5;
-        max-height: 20;
         border: solid $primary;
         padding: 1;
     }
@@ -190,7 +189,7 @@ class CoordinateList(Static):
     }
 
     CoordinateList .button-row {
-        width: 100%;
+        width: 45;
         height: auto;
         margin-top: 1;
         align: center middle;
@@ -246,7 +245,11 @@ class CoordinateList(Static):
         self._row_counter = 0
 
     def compose(self) -> ComposeResult:
-        yield Static(f'     {self._label1:^15} {self._label2:^15}', classes='coord-header')
+        with Horizontal(classes='coord-header'):
+            yield Label('', classes='header-spacer')
+            yield Label(self._label1, classes='header-label')
+            yield Label(self._label2, classes='header-label')
+
         with Vertical(classes='coord-rows', id='coord-rows-container'):
             if self._initial_coords:
                 for i, (v1, v2) in enumerate(self._initial_coords):
@@ -388,7 +391,6 @@ class TileList(Static):
     TileList {
         height: auto;
         min-height: 5;
-        max-height: 20;
         border: solid $primary;
         padding: 1;
     }
@@ -399,12 +401,27 @@ class TileList(Static):
         color: $text-muted;
     }
 
+    TileList .header-spacer {
+        width: 4;
+        min-width: 4;
+        max-width: 4;
+    }
+
+    TileList .header-label {
+        width: 18;
+        min-width: 18;
+        max-width: 18;
+        text-align: center;
+        color: $text-muted;
+        margin-right: 1;
+    }
+
     TileList .coord-rows {
         height: auto;
     }
 
     TileList .button-row {
-        width: 100%;
+        width: 45;
         height: auto;
         margin-top: 1;
         align: center middle;
@@ -436,6 +453,8 @@ class TileList(Static):
         self,
         tiles: list[tuple[int, int]] | None = None,
         *,
+        label1: str = 'XXX',
+        label2: str = 'YYY',
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
@@ -444,18 +463,22 @@ class TileList(Static):
 
         Args:
             tiles: Initial list of (x, y) tile tuples
+            label1: Label for first coordinate column (default 'XXX')
+            label2: Label for second coordinate column (default 'YYY')
             id: Widget ID
             classes: CSS classes
         """
         super().__init__(id=id, classes=classes)
         self._initial_tiles = tiles or []
+        self._label1 = label1
+        self._label2 = label2
         self._row_counter = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes='coord-header'):
             yield Label('', classes='header-spacer')
-            yield Label('X', classes='header-label')
-            yield Label('Y', classes='header-label')
+            yield Label(self._label1, classes='header-label')
+            yield Label(self._label2, classes='header-label')
 
         with Vertical(classes='coord-rows', id='tile-rows-container'):
             if self._initial_tiles:
@@ -464,8 +487,8 @@ class TileList(Static):
                         index=i,
                         value1=str(x),
                         value2=str(y),
-                        label1='X',
-                        label2='Y',
+                        label1=self._label1,
+                        label2=self._label2,
                         coord_type='int',
                         id=f'tile-row-{self._row_counter}',
                     )
@@ -512,8 +535,8 @@ class TileList(Static):
 
         new_row = CoordinateRow(
             index=new_index,
-            label1='X',
-            label2='Y',
+            label1=self._label1,
+            label2=self._label2,
             coord_type='int',
             id=f'tile-row-{self._row_counter}',
         )
@@ -565,8 +588,8 @@ class TileList(Static):
                     index=i,
                     value1=str(x),
                     value2=str(y),
-                    label1='X',
-                    label2='Y',
+                    label1=self._label1,
+                    label2=self._label2,
                     coord_type='int',
                     id=f'tile-row-{self._row_counter}',
                 )
