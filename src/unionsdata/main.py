@@ -562,7 +562,7 @@ def cli_entry() -> None:
         '--bands',
         nargs='+',
         type=str,
-        choices=['cfis-u', 'whigs-g', 'cfis_lsb-r', 'ps-i', 'wishes-z', 'ps-z'],
+        choices=['cfis-u', 'whigs-g', 'cfis-r', 'cfis_lsb-r', 'ps-i', 'wishes-z', 'ps-z'],
         help='Bands to download (overrides config file)',
     )
 

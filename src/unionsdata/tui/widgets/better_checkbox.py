@@ -37,8 +37,8 @@ class BetterCheckbox(Static, can_focus=True):
     """
 
     BINDINGS = [
-        ('enter', 'toggle', 'Toggle'),
-        ('space', 'toggle', 'Toggle'),
+        ('enter', 'toggle_value', 'Toggle'),
+        ('space', 'toggle_value', 'Toggle'),
     ]
 
     value: reactive[bool] = reactive(False, init=False)
