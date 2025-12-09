@@ -59,11 +59,8 @@ class RGBBandSelector(Static):
         align: left top;
     }
 
-    /* * Wrappers hold the colored top-border and the content (Select or Label).
-     * Fixed width ensures alignment consistency.
-     */
+    /* Wrappers hold the colored top-border and the content (Select or Label). */
     .band-wrapper {
-        width: 25;
         height: auto;
         margin-right: 1;
         border-top: heavy transparent;
@@ -76,9 +73,11 @@ class RGBBandSelector(Static):
 
     /* Interactive Select Widget */
     .band-wrapper Select {
-        width: 100%;
+        width: 25;
+        min-width: 25;
+        max-width: 25;
         margin: 0;
-        height: 3; /* Enforce standard height */
+        height: 3;
     }
 
     /* Locked Label State - Styles match Select to prevent layout jump */
@@ -118,15 +117,15 @@ class RGBBandSelector(Static):
     def compose(self) -> ComposeResult:
         with Horizontal():
             # Blue Slot
-            with Vertical(id='wrap_blue', classes='band-wrapper blue-band'):
+            with Vertical(id='wrap_blue', classes='band-wrapper blue-band field-input'):
                 yield Select[str]([], prompt='Blue (Short)', id='sel_blue')
 
             # Green Slot
-            with Vertical(id='wrap_green', classes='band-wrapper green-band'):
+            with Vertical(id='wrap_green', classes='band-wrapper green-band field-input'):
                 yield Select[str]([], prompt='Green (Mid)', id='sel_green')
 
             # Red Slot
-            with Vertical(id='wrap_red', classes='band-wrapper red-band'):
+            with Vertical(id='wrap_red', classes='band-wrapper red-band field-input'):
                 yield Select[str]([], prompt='Red (Long)', id='sel_red')
 
             yield Button('Reset', variant='default', id='reset-btn')
