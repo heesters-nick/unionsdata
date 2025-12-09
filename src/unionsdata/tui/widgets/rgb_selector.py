@@ -63,7 +63,7 @@ class RGBBandSelector(Static):
      * Fixed width ensures alignment consistency.
      */
     .band-wrapper {
-        width: 30;
+        width: 25;
         height: auto;
         margin-right: 1;
         border-top: heavy transparent;

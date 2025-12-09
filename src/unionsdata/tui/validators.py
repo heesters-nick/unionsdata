@@ -75,7 +75,7 @@ class PathExistsValidator(Validator):
         path = Path(value).expanduser()
 
         if not path.exists():
-            return self.failure('Path does not exist')
+            return self.failure('File does not exist')
 
         if self.must_be_file and not path.is_file():
             return self.failure('Must be a file')
@@ -89,7 +89,7 @@ class PathExistsValidator(Validator):
 class CertificateValidator(Validator):
     """Validate that a certificate file exists and is not expired."""
 
-    def __init__(self, warning_days: int = 5) -> None:
+    def __init__(self, warning_days: int = 2) -> None:
         super().__init__()
         self.warning_days = warning_days
 
@@ -112,40 +112,34 @@ class CertificateValidator(Validator):
             time_left = expiry - datetime.now(UTC)
 
             if time_left.total_seconds() < 0:
-                return self.failure(f'Certificate EXPIRED on {expiry.date()}')
+                msg = (
+                    f'Certificate EXPIRED on {expiry.date()}. '
+                    'Renew it using cadc-get-cert -u YOUR_CANFAR_USERNAME.'
+                )
+                return self.failure(msg)
 
-            if time_left < timedelta(days=self.warning_days):
-                # This is a warning, not a failure - we return success but the
-                # PathInput widget will show a warning indicator
-                return self.success()
+            return self.success()
 
         except Exception as e:
             return self.failure(f'Cannot read certificate: {e}')
 
-        return self.success()
-
-    def get_expiry_info(self, path: Path) -> tuple[bool, str]:
-        """
-        Get certificate expiry information.
-
-        Returns:
-            Tuple of (is_warning, message)
-        """
+    def get_expiry_warning(self, value: str) -> str | None:
+        """Check for warning condition (expiring soon)."""
         try:
+            path = Path(value).expanduser()
             cert = self._load_certificate(path)
             expiry = cert.not_valid_after_utc
             time_left = expiry - datetime.now(UTC)
 
-            if time_left.total_seconds() < 0:
-                return True, f'EXPIRED on {expiry.date()}'
-
-            if time_left < timedelta(days=self.warning_days):
-                return True, f'Expires in {time_left.days} days'
-
-            return False, f'Valid until {expiry.date()}'
-
-        except Exception as e:
-            return True, f'Cannot read: {e}'
+            if 0 < time_left.total_seconds() < timedelta(days=self.warning_days).total_seconds():
+                hours = int(time_left.total_seconds() / 3600)
+                return (
+                    f'Certificate expires in {hours} hours. '
+                    'Renew it using cadc-get-cert -u YOUR_CANFAR_USERNAME.'
+                )
+        except Exception:
+            pass
+        return None
 
     def _load_certificate(self, path: Path) -> Certificate:
         """Load a PEM certificate from file."""
