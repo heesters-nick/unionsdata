@@ -85,15 +85,9 @@ Select {
     width: 30;
 }
 
-/* Input styling */
-Input {
+/* Only affects inputs inside .field-input containers */
+.field-input Input {
     width: 100%;
-}
-
-/* Force RA and Dec inputs to split the width 50/50 */
-CoordinateList Input {
-    width: 1fr;
-    margin-right: 1;
 }
 
 /* Ensure PathInput widgets share space with labels correctly */

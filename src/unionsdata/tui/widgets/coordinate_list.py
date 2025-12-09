@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Input, Label, Static
 
 from unionsdata.tui.validators import FloatValidator, IntegerRange
 
@@ -26,8 +26,10 @@ class CoordinateRow(Static):
     }
 
     CoordinateRow .coord-input {
-        width: 15;
-        margin-right: 1;
+    width: 18;
+    min-width: 18;
+    max-width: 18;
+    margin-right: 1;
     }
 
     CoordinateRow .remove-btn {
@@ -36,8 +38,12 @@ class CoordinateRow(Static):
     }
 
     CoordinateRow .row-index {
+        height: 3;
         width: 4;
+        min-width: 4;
+        max-width: 4;
         text-align: right;
+        content-align: right middle;
         padding-right: 1;
         color: $text-muted;
     }
@@ -90,9 +96,7 @@ class CoordinateRow(Static):
 
     def compose(self) -> ComposeResult:
         validator = (
-            IntegerRange(minimum=0, maximum=999)
-            if self._coord_type == 'int'
-            else FloatValidator()
+            IntegerRange(minimum=0, maximum=999) if self._coord_type == 'int' else FloatValidator()
         )
 
         with Horizontal():
@@ -166,8 +170,30 @@ class CoordinateList(Static):
         color: $text-muted;
     }
 
+     CoordinateList .header-spacer {
+        width: 4;
+        min-width: 4;
+        max-width: 4;
+    }
+
+    CoordinateList .header-label {
+        width: 18;
+        min-width: 18;
+        max-width: 18;
+        text-align: center;
+        color: $text-muted;
+        margin-right: 1;
+    }
+
     CoordinateList .coord-rows {
         height: auto;
+    }
+
+    CoordinateList .button-row {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+        align: center middle;
     }
 
     CoordinateList .add-row-btn {
@@ -236,7 +262,9 @@ class CoordinateList(Static):
                     self._row_counter += 1
             else:
                 yield Static('No coordinates added', classes='empty-message')
-        yield Button('+ Add Coordinate', variant='primary', classes='add-row-btn')
+
+        with Horizontal(classes='button-row'):
+            yield Button('+ Add Coordinate', variant='primary', classes='add-row-btn')
 
     def on_mount(self) -> None:
         """Initialize coordinates on mount."""
@@ -375,6 +403,13 @@ class TileList(Static):
         height: auto;
     }
 
+    TileList .button-row {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+        align: center middle;
+    }
+
     TileList .add-row-btn {
         margin-top: 1;
         width: auto;
@@ -417,7 +452,11 @@ class TileList(Static):
         self._row_counter = 0
 
     def compose(self) -> ComposeResult:
-        yield Static('     X              Y', classes='coord-header')
+        with Horizontal(classes='coord-header'):
+            yield Label('', classes='header-spacer')
+            yield Label('X', classes='header-label')
+            yield Label('Y', classes='header-label')
+
         with Vertical(classes='coord-rows', id='tile-rows-container'):
             if self._initial_tiles:
                 for i, (x, y) in enumerate(self._initial_tiles):
@@ -433,7 +472,8 @@ class TileList(Static):
                     self._row_counter += 1
             else:
                 yield Static('No tiles added', classes='empty-message')
-        yield Button('+ Add Tile', variant='primary', classes='add-row-btn')
+        with Horizontal(classes='button-row'):
+            yield Button('+ Add Tile', variant='primary', classes='add-row-btn')
 
     def on_mount(self) -> None:
         """Initialize tiles on mount."""
