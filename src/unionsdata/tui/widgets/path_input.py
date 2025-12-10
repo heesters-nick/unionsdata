@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Input, Static
+from textual.widgets import Button, Input, Static
 
 from unionsdata.tui.validators import (
     CertificateValidator,
@@ -43,12 +43,23 @@ class PathInput(Static):
     PathInput .path-status.invalid { color: $error; }
     PathInput .path-status.warning { color: $warning; }
 
+    /* Added style for the injected button */
+    PathInput Button {
+        height: 100%;
+        min-width: 7;
+        margin-left: 1;
+        margin-right: 1;
+        border: none;
+    }
+
     PathInput .path-tooltip {
-        width: 1fr;
+        width: auto;      /* Was: 1fr */
+        max-width: 1fr;   /* Allow it to grow but share space */
         height: 100%;
         content-align: left middle;
         color: $text-muted;
         padding-left: 1;
+        padding-right: 1; /* Add some spacing before the button */
     }
     """
 
@@ -75,11 +86,13 @@ class PathInput(Static):
         is_certificate: bool = False,
         id: str | None = None,
         classes: str | None = None,
+        action_button: Button | None = None,
     ) -> None:
         super().__init__(id=id, classes=classes)
         self._initial_value = value
         self._placeholder = placeholder
         self._is_certificate = is_certificate
+        self._action_button = action_button
 
         # 1. Determine the correct validator
         self._validator: Validator | None = None
@@ -104,6 +117,9 @@ class PathInput(Static):
         )
         yield Static('', classes='path-status')
         yield Static('', classes='path-tooltip')
+
+        if self._action_button:
+            yield self._action_button
 
     def on_mount(self) -> None:
         self.value = self._initial_value
@@ -157,5 +173,24 @@ class PathInput(Static):
         self.value = value
         self.query_one(Input).value = value
 
+    def force_validate(self) -> None:
+        """Manually trigger validation to update UI. We need this after renewing or creating a certificate."""
+        # Get the inner Input widget
+        input_widget = self.query_one(Input)
+
+        # This checks the file on disk *now*
+        result = input_widget.validate(self.value)
+
+        # Update the Red X / Green Check UI
+        self._update_ui_state(result)
+
     def is_valid(self) -> bool:
-        return self.query_one(Input).is_valid
+        """Check validity dynamically."""
+        # Run the validator fresh.
+        result = self.query_one(Input).validate(self.value)
+
+        # If result is None, no validation was performed -> consider it valid
+        if result is None:
+            return True
+
+        return result.is_valid

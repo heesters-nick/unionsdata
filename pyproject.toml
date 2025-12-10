@@ -30,10 +30,11 @@ dependencies = [
     "tqdm>=4.67.1",
     "rich>=14.2.0",
     "textual>=6.6.0",
+    "pexpect>=4.9.0",
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     # Testing tools
     "pytest>=8.0",
@@ -50,6 +51,7 @@ dev = [
     "scipy-stubs",
     "types-psutil",
     "h5py-stubs",
+    "types-pexpect>=4.9.0.20250916",
 ]
 
 # ---- Console script entry points ----

@@ -295,3 +295,22 @@ CollapsibleTitle {
     border: solid $secondary;
     padding: 1;
 }
+
+/* Container for the certificate input and button */
+.field-input-group {
+    height: auto;
+    width: 1fr;
+    layout: horizontal;
+}
+
+/* Ensure the PathInput takes up available space */
+.field-input-group PathInput {
+    width: 1fr;
+}
+
+/* Style the Renew button to fit next to the input */
+.compact-btn {
+    height: 3;
+    min-width: 8;
+    margin-left: 1;
+}

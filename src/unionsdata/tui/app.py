@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
@@ -110,6 +112,173 @@ class ConfirmDialog(ModalScreen[bool]):
             self.dismiss(True)
         else:
             self.dismiss(False)
+
+
+class RenewCertificateDialog(ModalScreen[bool]):
+    """Dialog to renew the CADC certificate."""
+
+    DEFAULT_CSS = """
+    RenewCertificateDialog {
+        align: center middle;
+    }
+
+    RenewCertificateDialog > Vertical {
+        background: $surface;
+        border: thick $primary;
+        padding: 1 2;
+        width: 60;
+        height: auto;
+    }
+
+    RenewCertificateDialog .title {
+        text-style: bold;
+        margin-bottom: 1;
+        text-align: center;
+    }
+
+    RenewCertificateDialog Label {
+        margin-top: 1;
+    }
+
+    RenewCertificateDialog .buttons {
+        margin-top: 2;
+        align: center middle;
+        height: 3;
+    }
+
+    RenewCertificateDialog Button {
+        margin: 0 1;
+    }
+
+    RenewCertificateDialog #status-message {
+        margin-top: 1;
+        text-align: center;
+        color: $text-muted;
+    }
+
+    RenewCertificateDialog #status-message.error {
+        color: $error;
+    }
+    """
+
+    def __init__(self, current_username: str = '') -> None:
+        super().__init__()
+        self._initial_username = current_username
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static('Renew CADC Certificate', classes='title')
+
+            yield Input(
+                value=self._initial_username, placeholder='CADC Username', id='renew-username'
+            )
+
+            yield Input(placeholder='Password', password=True, id='renew-password')
+
+            yield Static('', id='status-message')
+
+            with Horizontal(classes='buttons'):
+                yield Button('Renew', variant='primary', id='btn-renew')
+                yield Button('Cancel', variant='error', id='btn-cancel')
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == 'btn-cancel':
+            self.dismiss(False)
+        elif event.button.id == 'btn-renew':
+            self._start_renewal()
+
+    def _start_renewal(self) -> None:
+        username = self.query_one('#renew-username', Input).value.strip()
+        password = self.query_one('#renew-password', Input).value
+
+        if not username or not password:
+            self._update_status('Username and password required', error=True)
+            return
+
+        if not shutil.which('cadc-get-cert'):
+            self._update_status("Error: 'cadc-get-cert' command not found", error=True)
+            return
+
+        self._update_status('Requesting certificate...', error=False)
+        self.query_one('#btn-renew', Button).disabled = True
+
+        # Start the background worker
+        self._run_cert_command(username, password)
+
+    @work(thread=True)
+    def _run_cert_command(self, username: str, password: str) -> None:
+        """Run the command using pexpect to handle the interactive password prompt."""
+        try:
+            import pexpect
+        except ImportError:
+            self.app.call_from_thread(
+                self._handle_error, 'pexpect not found. Run: pip install pexpect'
+            )
+            return
+
+        try:
+            cmd = 'cadc-get-cert'
+            args = ['-u', username]
+
+            # encoding='utf-8' ensures we deal with strings, not bytes
+            child = pexpect.spawn(cmd, args, encoding='utf-8', timeout=10)
+
+            # Wait for the password prompt
+            # We look for "Password:" or "password:"
+            index = child.expect(['[Pp]assword:', pexpect.EOF, pexpect.TIMEOUT])
+
+            if index == 0:
+                # Prompt found: send password and newline
+                child.sendline(password)
+
+                # Wait for the process to finish
+                child.expect(pexpect.EOF)
+                child.close()
+
+                if child.exitstatus == 0:
+                    self.app.call_from_thread(self._handle_success)
+                else:
+                    # Grab output that occurred before the EOF (likely error messages)
+                    err_output = child.before.strip() if child.before else 'Unknown error'
+                    self.app.call_from_thread(self._handle_error, err_output)
+
+            elif index == 1:
+                # EOF happened before we saw a password prompt
+                child.close()
+                err_output = child.before.strip() if child.before else 'Process exited unexpectedly'
+                self.app.call_from_thread(self._handle_error, err_output)
+
+            elif index == 2:
+                # Timeout
+                child.close()
+                self.app.call_from_thread(self._handle_error, 'Connection timed out')
+
+        except Exception as e:
+            self.app.call_from_thread(self._handle_error, str(e))
+
+    def _handle_success(self) -> None:
+        """Handle successful certificate renewal."""
+        self.dismiss(True)
+
+    def _handle_error(self, message: str) -> None:
+        """Handle error during renewal."""
+        # Simplify common error messages for the UI
+        if 'Permission denied' in message or 'Login failed' in message:
+            ui_msg = 'Invalid username or password'
+        else:
+            ui_msg = f'Error: {message}'
+
+        self._update_status(ui_msg, error=True)
+        self.query_one('#btn-renew', Button).disabled = False
+
+    def _update_status(self, message: str, error: bool = False) -> None:
+        """Update the status label."""
+        status = self.query_one('#status-message', Static)
+        status.update(message)
+        if error:
+            status.add_class('error')
+        else:
+            status.remove_class('error')
 
 
 class ConfigEditorApp(App[None]):
@@ -801,12 +970,16 @@ class ConfigEditorApp(App[None]):
                         'CADC proxy certificate\nGenerate with: cadc-get-cert -u USERNAME'
                     )
                     yield Label(':')
+
+                # Pass the button directly to PathInput
                 yield PathInput(
                     value=str(paths.get('cert_path', '')),
                     must_exist=True,
                     must_be_file=True,
                     is_certificate=True,
                     id='path-cert',
+                    # Create button here and pass it in
+                    action_button=Button('Create/Renew', id='btn-open-renew', variant='default'),
                 )
 
     # ==================== Event Handlers ====================
@@ -844,6 +1017,8 @@ class ConfigEditorApp(App[None]):
             self.action_save()
         elif event.button.id == 'cancel-btn':
             self.action_quit_app()
+        elif event.button.id == 'btn-open-renew':
+            self.push_screen(RenewCertificateDialog(), self._handle_renew_result)
 
     def on_band_selector_changed(self, event: BandSelector.Changed) -> None:
         """Track band selection changes."""
@@ -930,6 +1105,21 @@ class ConfigEditorApp(App[None]):
             )
         else:
             self.exit()
+
+    def _handle_renew_result(self, success: bool | None) -> None:
+        """Called when the renewal dialog closes."""
+        if success:
+            self.notify(
+                'Certificate renewed successfully!', title='Success', severity='information'
+            )
+
+            # Refresh the validation state of the path input
+            try:
+                cert_input = self.query_one('#path-cert', PathInput)
+                # Force it to check the file on disk again
+                cert_input.force_validate()
+            except Exception:
+                pass
 
     def _handle_quit_confirm(self, confirmed: bool | None) -> None:
         """Handle quit confirmation dialog result."""
