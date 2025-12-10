@@ -61,22 +61,27 @@ class ConfirmDialog(ModalScreen[bool]):
         padding: 1 2;
         width: 60;
         height: auto;
-        max-height: 20;
+        max-height: 80%;
     }
 
     ConfirmDialog .dialog-title {
         text-style: bold;
         margin-bottom: 1;
+        dock: top;
     }
 
     ConfirmDialog .dialog-message {
         margin-bottom: 2;
+        height: auto;
+        max-height: 1fr;
+        overflow-y: auto;
     }
 
     ConfirmDialog .dialog-buttons {
         layout: horizontal;
         align: center middle;
         height: 3;
+        dock: bottom;
     }
 
     ConfirmDialog .dialog-buttons Button {
@@ -104,7 +109,7 @@ class ConfirmDialog(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static(self._title, classes='dialog-title')
-            yield Static(self._message, classes='dialog-message')
+            yield Static(self._message, classes='dialog-message', markup=False)
             with Horizontal(classes='dialog-buttons'):
                 # ID mapping: yes -> True, no -> False
                 yield Button(self._yes_label, variant=self._yes_variant, id='confirm-yes')
@@ -607,11 +612,11 @@ class ConfigEditorApp(App[None]):
                         'Minimum number of bands a tile must have to qualify for download'
                     )
                     yield Label(':')
-                yield Input(
+                yield Select(
+                    [(str(i), str(i)) for i in range(1, 8)],
                     value=str(tiles.get('band_constraint', 1)),
                     id='band-constraint',
                     classes='field-input',
-                    validators=[IntegerRange(1, 7)],
                 )
 
             # Require all bands
@@ -693,11 +698,19 @@ class ConfigEditorApp(App[None]):
                         'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
                     )
                     yield Label(':')
-                yield Input(
-                    value=plotting.get('catalog_name', 'catalog'),
+
+                current_catalog = plotting.get('catalog_name', 'auto')
+                options = self._get_catalog_options()
+
+                existing_values = {opt[1] for opt in options}
+                if current_catalog and current_catalog not in existing_values:
+                    options.append((current_catalog, current_catalog))
+
+                yield Select(
+                    options,
+                    value=current_catalog,
                     id='plot-catalog-name',
                     classes='field-input',
-                    validators=[NonEmptyValidator()],
                 )
 
             # RGB Band Selection; none = will use first three runtime bands
@@ -1235,6 +1248,42 @@ Tips:
         except Exception:
             pass
 
+    def _get_catalog_options(self) -> list[tuple[str, str]]:
+        """Get catalog options from the tables directory."""
+        # Always start with Auto
+        options = [('Auto', 'auto')]
+
+        try:
+            # Determine the table directory to search
+            try:
+                # Try getting path from the "Paths" tab input if it's mounted
+                dir_str = self.query_one('#path-tables', PathInput).value
+            except Exception:
+                # Fallback to initial config
+                machine = self._config_data.get('machine', 'local')
+                paths = self._config_data.get('paths_by_machine', {}).get(machine, {})
+                dir_str = str(paths.get('dir_tables', ''))
+
+            # Scan directory
+            dir_path = Path(dir_str).expanduser()
+            if dir_path.exists() and dir_path.is_dir():
+                found_catalogs = []
+                for file_path in dir_path.glob('*_augmented.csv'):
+                    # Remove the suffix to get the catalog name
+                    # e.g., "my_data_augmented.csv" -> "my_data"
+                    name = file_path.name.replace('_augmented.csv', '')
+                    found_catalogs.append((name, name))
+
+                # Sort alphabetically and add to options
+                found_catalogs.sort()
+                options.extend(found_catalogs)
+
+        except Exception:
+            # Fail silently and just show "Auto" if paths are invalid
+            pass
+
+        return options
+
     def _collect_all_values(self) -> dict[str, Any]:
         """Collect all widget values into a configuration dictionary."""
         config: dict[str, Any] = {}
@@ -1268,7 +1317,7 @@ Tips:
             'show_tile_statistics': self.query_one(
                 '#show-tile-stats-checkbox', BetterCheckbox
             ).value,
-            'band_constraint': int(self._get_input_value('#band-constraint', '1')),
+            'band_constraint': int(str(self.query_one('#band-constraint', Select).value)),
             'require_all_specified_bands': self.query_one(
                 '#require-all-bands-checkbox', BetterCheckbox
             ).value,
@@ -1288,7 +1337,7 @@ Tips:
         plot_bands_value = plot_bands if plot_bands else None
 
         config['plotting'] = {
-            'catalog_name': self._get_input_value('#plot-catalog-name', 'catalog'),
+            'catalog_name': str(self.query_one('#plot-catalog-name', Select).value),
             'bands': plot_bands_value,
             'size_pix': int(self._get_input_value('#plot-size', '512')),
             'mode': str(self.query_one('#plot-mode', Select).value),
@@ -1358,6 +1407,26 @@ Tips:
         """Validate the current configuration and return list of errors."""
         errors: list[str] = []
 
+        # Check all Select widgets for missing selections
+        selects = {
+            '#machine-select': 'Machine',
+            '#logging-level': 'Log Level',
+            '#plot-mode': 'Display Mode',
+            '#plot-save-format': 'Save Format',
+            '#rgb-scaling-type': 'Scaling Type',
+            '#input-source-select': 'Input Source',
+            '#band-constraint': 'Band Constraint',
+            '#plot-catalog-name': 'Catalog Name',
+        }
+
+        for selector, name in selects.items():
+            try:
+                val = self.query_one(selector, Select).value
+                if val == Select.BLANK:
+                    errors.append(f'{name} must be selected')
+            except Exception:
+                pass
+
         # Validate bands
         band_selector = self.query_one('#band-selector', BandSelector)
         if not band_selector.is_valid():
@@ -1368,7 +1437,6 @@ Tips:
             ('#n-download-threads', 'Download threads', 1, 32),
             ('#n-cutout-processes', 'Cutout processes', 1, 32),
             ('#max-retries', 'Max retries', 1, 10),
-            ('#band-constraint', 'Band constraint', 1, 7),
             ('#cutout-size', 'Cutout size', 1, 10000),
         ]
 
@@ -1400,6 +1468,9 @@ Tips:
                 errors.append('DataFrame path is required when source is "dataframe"')
             elif not df_path.is_valid():
                 errors.append('DataFrame file does not exist')
+
+        if errors:
+            return errors
 
         # Try Pydantic validation
         try:
