@@ -84,7 +84,7 @@ paths_by_machine:
     root_dir_data: "/home/nick/astro/unionsdata/data"
     dir_tables: "/home/nick/astro/unionsdata/tables"
     dir_figures: "/home/nick/astro/unionsdata/figures"
-    cert_path: "/home/nick/.ssl/cadcproxy.pem"
+    cert_path: "something/something/cadcproxy.pem"
 
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"

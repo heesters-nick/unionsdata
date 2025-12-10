@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import pexpect
 import yaml
 from textual import work
 from textual.app import App, ComposeResult
@@ -25,6 +27,7 @@ from textual.widgets import (
     TabPane,
 )
 
+from unionsdata.config import RawConfig, get_user_config_dir
 from unionsdata.tui.validators import IntegerRange, NonEmptyValidator
 from unionsdata.tui.widgets import (
     BandSelector,
@@ -114,7 +117,7 @@ class ConfirmDialog(ModalScreen[bool]):
             self.dismiss(False)
 
 
-class RenewCertificateDialog(ModalScreen[bool]):
+class RenewCertificateDialog(ModalScreen[dict[str, Any] | None]):
     """Dialog to renew the CADC certificate."""
 
     DEFAULT_CSS = """
@@ -136,8 +139,9 @@ class RenewCertificateDialog(ModalScreen[bool]):
         text-align: center;
     }
 
-    RenewCertificateDialog Label {
-        margin-top: 1;
+    /* Spacing between inputs */
+    RenewCertificateDialog #renew-username {
+        margin-bottom: 1;
     }
 
     RenewCertificateDialog .buttons {
@@ -148,6 +152,16 @@ class RenewCertificateDialog(ModalScreen[bool]):
 
     RenewCertificateDialog Button {
         margin: 0 1;
+    }
+
+    /* Use !important to override the theme's specificity */
+    #btn-renew:disabled,
+    #btn-renew:disabled:hover {
+        opacity: 0.4 !important;
+        tint: 0% !important;
+        border: none !important; /* Removes the 3D border that shimmers on hover */
+        background: $primary !important; /* Locks background color */
+        height: 3 !important; /* Enforce height since border removal might shrink it */
     }
 
     RenewCertificateDialog #status-message {
@@ -167,23 +181,44 @@ class RenewCertificateDialog(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static('Renew CADC Certificate', classes='title')
+            yield Static('Create/Renew CADC Certificate', classes='title')
 
+            # validators=[NonEmptyValidator()] ensures the box turns Green (valid)
+            # when text is present, and Red (invalid) when empty.
             yield Input(
-                value=self._initial_username, placeholder='CADC Username', id='renew-username'
+                value=self._initial_username,
+                placeholder='CADC Username',
+                id='renew-username',
+                validators=[NonEmptyValidator()],
             )
 
-            yield Input(placeholder='Password', password=True, id='renew-password')
+            yield Input(
+                placeholder='Password',
+                password=True,
+                id='renew-password',
+                validators=[NonEmptyValidator()],
+            )
 
             yield Static('', id='status-message')
 
             with Horizontal(classes='buttons'):
-                yield Button('Renew', variant='primary', id='btn-renew')
-                yield Button('Cancel', variant='error', id='btn-cancel')
+                yield Button('Create/Renew', variant='primary', id='btn-renew', disabled=True)
+                yield Button('✗ Cancel', variant='error', id='btn-cancel')
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Enable the renew button only when both fields are filled."""
+        try:
+            username = self.query_one('#renew-username', Input).value.strip()
+            password = self.query_one('#renew-password', Input).value.strip()
+
+            # Enable button only if both fields have text
+            self.query_one('#btn-renew', Button).disabled = not (username and password)
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == 'btn-cancel':
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.button.id == 'btn-renew':
             self._start_renewal()
 
@@ -202,77 +237,76 @@ class RenewCertificateDialog(ModalScreen[bool]):
         self._update_status('Requesting certificate...', error=False)
         self.query_one('#btn-renew', Button).disabled = True
 
-        # Start the background worker
         self._run_cert_command(username, password)
 
     @work(thread=True)
     def _run_cert_command(self, username: str, password: str) -> None:
         """Run the command using pexpect to handle the interactive password prompt."""
-        try:
-            import pexpect
-        except ImportError:
-            self.app.call_from_thread(
-                self._handle_error, 'pexpect not found. Run: pip install pexpect'
-            )
-            return
 
         try:
             cmd = 'cadc-get-cert'
             args = ['-u', username]
 
-            # encoding='utf-8' ensures we deal with strings, not bytes
-            child = pexpect.spawn(cmd, args, encoding='utf-8', timeout=10)
+            child = pexpect.spawn(cmd, args, encoding='utf-8', timeout=15)
 
-            # Wait for the password prompt
-            # We look for "Password:" or "password:"
             index = child.expect(['[Pp]assword:', pexpect.EOF, pexpect.TIMEOUT])
 
             if index == 0:
-                # Prompt found: send password and newline
                 child.sendline(password)
-
-                # Wait for the process to finish
                 child.expect(pexpect.EOF)
                 child.close()
 
+                raw_output = child.before or ''
+                output = raw_output.strip()
+
+                # Check for explicit failure messages first
+                if 'invalid username/password combination' in output or 'FAILED' in output:
+                    self.app.call_from_thread(self._handle_error, 'Invalid username or password')
+                    return
+
                 if child.exitstatus == 0:
-                    self.app.call_from_thread(self._handle_success)
+                    # Strict success check: We MUST find the "saved in" message.
+                    match = re.search(r'saved in\s+(.+)$', output, re.MULTILINE)
+
+                    if match:
+                        path = match.group(1).strip()
+                        if path.endswith('.'):
+                            path = path[:-1]
+                        self.app.call_from_thread(self._handle_success, path)
+                    else:
+                        # No "saved in" message = FAILURE.
+                        self.app.call_from_thread(
+                            self._handle_error,
+                            f'Certificate renewal failed. Unexpected output: {output}',
+                        )
                 else:
-                    # Grab output that occurred before the EOF (likely error messages)
-                    err_output = child.before.strip() if child.before else 'Unknown error'
-                    self.app.call_from_thread(self._handle_error, err_output)
+                    self.app.call_from_thread(self._handle_error, output)
 
             elif index == 1:
-                # EOF happened before we saw a password prompt
                 child.close()
-                err_output = child.before.strip() if child.before else 'Process exited unexpectedly'
+                err_output = (child.before or '').strip() or 'Process exited unexpectedly'
                 self.app.call_from_thread(self._handle_error, err_output)
 
             elif index == 2:
-                # Timeout
                 child.close()
                 self.app.call_from_thread(self._handle_error, 'Connection timed out')
 
         except Exception as e:
             self.app.call_from_thread(self._handle_error, str(e))
 
-    def _handle_success(self) -> None:
-        """Handle successful certificate renewal."""
-        self.dismiss(True)
+    def _handle_success(self, path: str) -> None:
+        """Return success data to the main app."""
+        self.dismiss({'success': True, 'path': path})
 
     def _handle_error(self, message: str) -> None:
-        """Handle error during renewal."""
-        # Simplify common error messages for the UI
         if 'Permission denied' in message or 'Login failed' in message:
             ui_msg = 'Invalid username or password'
         else:
             ui_msg = f'Error: {message}'
-
         self._update_status(ui_msg, error=True)
         self.query_one('#btn-renew', Button).disabled = False
 
     def _update_status(self, message: str, error: bool = False) -> None:
-        """Update the status label."""
         status = self.query_one('#status-message', Static)
         status.update(message)
         if error:
@@ -304,8 +338,6 @@ class ConfigEditorApp(App[None]):
 
     def _load_config(self) -> None:
         """Load configuration from file or use defaults."""
-        from unionsdata.config import get_user_config_dir
-
         # Determine config path
         if self._config_path is None:
             self._config_path = get_user_config_dir() / 'config.yaml'
@@ -657,7 +689,9 @@ class ConfigEditorApp(App[None]):
             with Horizontal(classes='field-row'):
                 with Horizontal(classes='field-label'):
                     yield Label('Catalog Name')
-                    yield InfoIcon('Name of catalog file (without _augmented.csv suffix)')
+                    yield InfoIcon(
+                        'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
+                    )
                     yield Label(':')
                 yield Input(
                     value=plotting.get('catalog_name', 'catalog'),
@@ -967,7 +1001,7 @@ class ConfigEditorApp(App[None]):
                 with Horizontal(classes='field-label'):
                     yield Label('Certificate Path')
                     yield InfoIcon(
-                        'CADC proxy certificate\nGenerate with: cadc-get-cert -u USERNAME'
+                        'CADC proxy certificate. Generate by pressing the Create/Renew button to the right'
                     )
                     yield Label(':')
 
@@ -1018,6 +1052,7 @@ class ConfigEditorApp(App[None]):
         elif event.button.id == 'cancel-btn':
             self.action_quit_app()
         elif event.button.id == 'btn-open-renew':
+            # Open dialog without arguments (we don't pass current path anymore)
             self.push_screen(RenewCertificateDialog(), self._handle_renew_result)
 
     def on_band_selector_changed(self, event: BandSelector.Changed) -> None:
@@ -1106,20 +1141,22 @@ class ConfigEditorApp(App[None]):
         else:
             self.exit()
 
-    def _handle_renew_result(self, success: bool | None) -> None:
+    def _handle_renew_result(self, result: dict[str, Any] | None) -> None:
         """Called when the renewal dialog closes."""
-        if success:
-            self.notify(
-                'Certificate renewed successfully!', title='Success', severity='information'
-            )
+        if result and result.get('success'):
+            path = result['path']
 
-            # Refresh the validation state of the path input
+            # 1. Update the UI with the AUTO-DETECTED path
             try:
                 cert_input = self.query_one('#path-cert', PathInput)
-                # Force it to check the file on disk again
+                cert_input.set_value(path)
                 cert_input.force_validate()
             except Exception:
                 pass
+
+            # 2. Show notification
+            msg = f'Certificate saved successfully.\nLocation: {path}'
+            self.notify(msg, title='Success', severity='information', timeout=5.0)
 
     def _handle_quit_confirm(self, confirmed: bool | None) -> None:
         """Handle quit confirmation dialog result."""
@@ -1366,8 +1403,6 @@ Tips:
 
         # Try Pydantic validation
         try:
-            from unionsdata.config import RawConfig
-
             config_dict = self._collect_all_values()
             RawConfig.model_validate(config_dict)
         except Exception as e:
