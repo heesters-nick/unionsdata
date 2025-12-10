@@ -26,7 +26,7 @@ pip install unionsdata
 
 # Setup (opens config in editor)
 unionsdata init
-unionsdata edit  # Set your paths
+unionsdata config  # Configure your download
 
 # Get credentials (valid 10 days)
 cadc-get-cert -u YOUR_CANFAR_USERNAME
@@ -72,10 +72,10 @@ This creates your configuration file at:
 **Step 3:** Edit the configuration
 
 ```bash
-unionsdata edit
+unionsdata config
 ```
 
-This opens the config file in your default editor. Update the paths and other parameters:
+This opens a terminal user interface. Update the paths and other parameters:
 
 ```yaml
 machine: local
@@ -93,12 +93,6 @@ paths_by_machine:
 
 ```bash
 cadc-get-cert -u YOUR_CANFAR_USERNAME
-```
-
-**Step 5:** Validate your configuration
-
-```bash
-unionsdata validate
 ```
 
 ### Option 2: Install from Source (For Development)
@@ -139,12 +133,6 @@ paths_by_machine:
 cadc-get-cert -u YOUR_CANFAR_USERNAME
 ```
 
-**Step 4:** Validate your configuration
-
-```bash
-unionsdata validate
-```
-
 ## Usage
 
 ### Command Line Interface
@@ -154,8 +142,7 @@ The package provides a `unionsdata` command with several subcommands:
 | Command | Description |
 |---------|-------------|
 | `unionsdata init` | Initialize configuration file (first-time setup) |
-| `unionsdata edit` | Open configuration file in default editor |
-| `unionsdata validate` | Validate your configuration |
+| `unionsdata config` | Open terminal user interface to edit the config file |
 | `unionsdata download` | Start downloading data |
 | `unionsdata` | Shortcut alias for `unionsdata download` |
 | `unionsdata plot` | Plot created cutouts |
@@ -351,12 +338,8 @@ cadc-get-cert -u YOUR_CANFAR_USERNAME
 ### Config Issues
 
 ```bash
-# Check config
-unionsdata validate
-# Reset (Linux/Mac)
-rm ~/.config/unionsdata/config.yaml
-# Create a fresh copy
-unionsdata init
+# Create a fresh copy of the default config file in your local environment
+unionsdata init --force
 ```
 
 ## Acknowledgments

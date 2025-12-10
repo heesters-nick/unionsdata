@@ -132,7 +132,7 @@ plotting:
   figsize: null
   save_plot: true
   show_plot: false
-  save_name: "test_catalog_cutouts.pdf"
+  save_format: "pdf"
 
   rgb:
     scaling_type: "asinh"

@@ -9,9 +9,9 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandDict, Settings
 from unionsdata.make_rgb import generate_rgb, preprocess_cutout
-from unionsdata.utils import get_dataset
+from unionsdata.utils import get_bands_short_string, get_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +287,69 @@ def cutouts_to_rgb(
     }
 
     return result
+
+
+def find_most_recent_catalog(tables_dir: Path) -> Path | None:
+    """
+    Find the most recently modified augmented catalog in the tables directory.
+
+    Args:
+        tables_dir: Directory containing augmented catalog files
+
+    Returns:
+        Path to the most recent *_augmented.csv file, or None if none found
+    """
+    augmented_files = list(tables_dir.glob('*_augmented.csv'))
+
+    if not augmented_files:
+        return None
+
+    # Sort by modification time, most recent first
+    augmented_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    if len(augmented_files) > 1:
+        logger.info(
+            f'Found {len(augmented_files)} augmented catalogs, '
+            f'using most recent: {augmented_files[0].name}'
+        )
+
+    return augmented_files[0]
+
+
+def build_plot_filename(
+    catalog_name: str,
+    size_pix: int,
+    bands: list[str],
+    band_dict: dict[str, BandDict],
+    extension: str,
+) -> str:
+    """..."""
+    band_str = get_bands_short_string(bands, band_dict)
+    return f'{catalog_name}_cutouts_{size_pix}_{band_str}.{extension}'
+
+
+def resolve_plot_bands(cfg: Settings) -> list[str]:
+    """Determine which bands to use for plotting RGB images.
+    Args:
+        cfg: Settings object with runtime and plotting configurations
+
+    Returns:
+        List of 3 band names to use for RGB plotting"""
+    plot_bands = cfg.plotting.bands
+    if plot_bands is None or len(plot_bands) == 0:
+        if len(cfg.runtime.bands) < 3:
+            if cfg.cutouts.enable:
+                logger.warning(
+                    f'Only {len(cfg.runtime.bands)} runtime band(s) configured, '
+                    'but RGB plotting requires exactly 3 bands. '
+                    'Plotting may fail or produce incomplete results.'
+                )
+            plot_bands = cfg.runtime.bands[:3]  # Use what we have
+        else:
+            plot_bands = cfg.runtime.bands[:3]
+            logger.info(f'Using runtime bands for RGB: {plot_bands}')
+
+    return plot_bands
 
 
 def plot_cutouts(

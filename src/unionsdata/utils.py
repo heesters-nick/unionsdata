@@ -668,3 +668,17 @@ def read_h5(
 def get_dataset(f: h5py.File, key: str) -> h5py.Dataset:
     """Helper to cast h5py file access to Dataset type."""
     return cast(h5py.Dataset, f[key])
+
+
+def get_bands_short_string(bands: list[str], band_dict: dict[str, BandDict]) -> str:
+    """
+    Get short string representation of bands for filename.
+
+    Args:
+        bands: List of band keys (e.g., ['whigs-g', 'cfis-r', 'ps-i'])
+        band_dict: Band configuration dictionary
+
+    Returns:
+        Concatenated band letters (e.g., 'gri')
+    """
+    return ''.join(band_dict[b]['band'] for b in bands)

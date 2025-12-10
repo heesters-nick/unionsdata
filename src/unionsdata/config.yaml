@@ -33,15 +33,15 @@ cutouts:
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
-  catalog_name: 'M81_selection'                                   # plot object cutouts from this catalog (file in tables directory: {catalog_name}_augmented.csv)
-  bands: ['whigs-g', 'cfis-r', 'ps-i']                         # bands to use for RGB cutouts
+  catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
+  bands: null                                                      # bands to use for RGB cutouts; null = first 3 from runtime.bands
   size_pix: 512                                                    # square size of cutouts in pixels
-  mode: "channel"                                                     # grid | channel
+  mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
   figsize: null                                                    # figure size (width, height) in inches; null for automatic
   save_plot: true                                                  # save plots to disk
   show_plot: false                                                 # display plots interactively
-  save_name: "{catalog_name}_cutouts_{size_pix}.pdf"               # filename for saved plot; supports {catalog_name} and {size_pix} placeholders
+  save_format: "png"                                               # output format: pdf, png, jpg, svg
 
   rgb:
     scaling_type: "asinh"                                          # 'asinh' or 'linear'

@@ -25,7 +25,14 @@ from unionsdata.config import (
 )
 from unionsdata.download import download_tiles
 from unionsdata.logging_setup import setup_logger
-from unionsdata.plotting import cutouts_to_rgb, load_cutouts, plot_cutouts
+from unionsdata.plotting import (
+    build_plot_filename,
+    cutouts_to_rgb,
+    find_most_recent_catalog,
+    load_cutouts,
+    plot_cutouts,
+    resolve_plot_bands,
+)
 from unionsdata.tui import run_config_editor
 from unionsdata.utils import (
     TileAvailability,
@@ -300,7 +307,7 @@ def run_init(args: argparse.Namespace) -> None:
             f.write(template_content)
 
         logger.info(f'Successfully created config file at: {user_config_path}')
-        logger.info('You can now edit this file with your custom paths.')
+        logger.info('You can now edit this file by running "unionsdata config"')
 
     except FileNotFoundError:
         logger.error('Could not find the config template within the package.')
@@ -415,10 +422,6 @@ def run_plot(args: argparse.Namespace) -> None:
     cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
     logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
-    # filter considered bands from the full band dictionary
-    selected_band_dict: dict[str, BandDict] = {
-        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
-    }
     # make sure necessary directories exist
     ensure_runtime_dirs(cfg=cfg)
 
@@ -427,14 +430,47 @@ def run_plot(args: argparse.Namespace) -> None:
     data_dir = cfg.paths.root_dir_data
     cutout_size = cfg.plotting.size_pix
     catalog_name = cfg.plotting.catalog_name
-    catalog_path = table_dir / (catalog_name + '_augmented.csv')
-    save_path = figure_dir / (
-        cfg.plotting.save_name.format(catalog_name=catalog_name, size_pix=cutout_size)
+
+    # Resolve plotting bands - default to first 3 runtime bands
+    plot_bands = resolve_plot_bands(cfg)
+
+    # filter considered bands from the full band dictionary
+    selected_band_dict: dict[str, BandDict] = {
+        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in plot_bands
+    }
+
+    # CLI override takes precedence
+    if hasattr(args, 'catalog') and args.catalog:
+        catalog_name = args.catalog
+        logger.info(f'Using catalog from CLI: {catalog_name}')
+    elif catalog_name.lower() == 'auto' or not catalog_name.strip():
+        # Auto-detect most recent augmented catalog
+        catalog_path = find_most_recent_catalog(table_dir)
+        if catalog_path is None:
+            logger.error('No augmented catalogs found in tables directory.')
+            logger.info(
+                "Run 'unionsdata download' with coordinates or a dataframe first "
+                'to create cutouts and augmented catalogs.'
+            )
+            sys.exit(1)
+        # Extract catalog name from path (remove _augmented.csv suffix)
+        catalog_name = catalog_path.stem.replace('_augmented', '')
+        logger.info(f'Auto-detected catalog: {catalog_name}')
+
+    catalog_path = table_dir / f'{catalog_name}_augmented.csv'
+
+    save_filename = build_plot_filename(
+        catalog_name=catalog_name,
+        size_pix=cutout_size,
+        bands=plot_bands,
+        band_dict=selected_band_dict,
+        extension=cfg.plotting.save_format,
     )
+    save_path = figure_dir / save_filename
 
     cutout_data = load_cutouts(
         catalog_path=catalog_path,
-        bands_to_plot=cfg.plotting.bands,
+        bands_to_plot=plot_bands,
         data_dir=data_dir,
         cutout_subdir=cfg.cutouts.output_subdir,
         cutout_size=cutout_size,
@@ -455,13 +491,14 @@ def run_plot(args: argparse.Namespace) -> None:
         mode=cfg.plotting.mode,
         max_cols=cfg.plotting.max_cols,
         figsize=cfg.plotting.figsize,
-        save_path=save_path,
+        save_path=save_path if cfg.plotting.save_plot else None,
         show_plot=cfg.plotting.show_plot,
     )
 
     plot_end = time.time()
     elapsed = plot_end - plot_start
-    logger.info(f'Plotting completed in {elapsed:.2f} seconds.')
+    logger.debug(f'Plotting completed in {elapsed:.2f} seconds.')
+    logger.info(f'Done! Plot saved to {save_path}')
 
 
 def cli_entry() -> None:

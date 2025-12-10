@@ -75,15 +75,15 @@ class PlottingCfg(BaseModel):
     """Plotting configuration."""
 
     model_config = ConfigDict(extra='forbid')
-    catalog_name: str
-    bands: list[str] = Field(..., min_length=3, max_length=3)
+    catalog_name: str = 'auto'
+    bands: list[str] | None = None  # None = use first 3 from runtime.bands
     size_pix: int = Field(ge=1)
     mode: Literal['grid', 'channel'] = 'grid'
     max_cols: int = Field(ge=1, default=5)
     figsize: tuple[int, int] | None = None
     save_plot: bool = True
     show_plot: bool = False
-    save_name: str = '{catalog_name}_cutouts_{size_pix}.png'
+    save_format: Literal['pdf', 'png', 'jpg', 'svg'] = 'pdf'
     rgb: RGBCfg = Field(default_factory=RGBCfg)
 
 

@@ -187,14 +187,14 @@ class ConfigEditorApp(App[None]):
             },
             'plotting': {
                 'catalog_name': 'catalog',
-                'bands': ['whigs-g', 'cfis-r', 'ps-i'],
+                'bands': None,
                 'size_pix': 512,
                 'mode': 'grid',
                 'max_cols': 5,
                 'figsize': None,
                 'save_plot': True,
                 'show_plot': False,
-                'save_name': '{catalog_name}_cutouts_{size_pix}.png',
+                'save_format': 'pdf',
                 'rgb': {
                     'scaling_type': 'asinh',
                     'stretch': 125.0,
@@ -235,6 +235,12 @@ class ConfigEditorApp(App[None]):
             with TabPane('General', id='general-tab'):
                 yield from self._compose_general_tab()
 
+            with TabPane('Paths', id='paths-tab'):
+                yield from self._compose_paths_tab()
+
+            with TabPane('Inputs', id='inputs-tab'):
+                yield from self._compose_inputs_tab()
+
             with TabPane('Runtime', id='runtime-tab'):
                 yield from self._compose_runtime_tab()
 
@@ -249,12 +255,6 @@ class ConfigEditorApp(App[None]):
 
             with TabPane('Plotting', id='plotting-tab'):
                 yield from self._compose_plotting_tab()
-
-            with TabPane('Inputs', id='inputs-tab'):
-                yield from self._compose_inputs_tab()
-
-            with TabPane('Paths', id='paths-tab'):
-                yield from self._compose_paths_tab()
 
         with Horizontal(id='button-bar'):
             yield Button('💾 Save & Quit', variant='primary', id='save-btn')
@@ -497,14 +497,14 @@ class ConfigEditorApp(App[None]):
                     validators=[NonEmptyValidator()],
                 )
 
-            # RGB Band Selection
-            plot_bands = plotting.get('bands', ['whigs-g', 'cfis-r', 'ps-i'])
+            # RGB Band Selection; none = will use first three runtime bands
+            plot_bands = plotting.get('bands') or []
 
             with Horizontal(classes='field-row'):
                 with Horizontal(classes='field-label'):
                     yield Label('RGB Bands')
                     yield InfoIcon(
-                        'Select bands for RGB channels. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
+                        'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
                     )
                     yield Label(':')
 
@@ -566,25 +566,22 @@ class ConfigEditorApp(App[None]):
             with Horizontal(classes='field-row'):
                 yield Label('Show Plot:', classes='field-label')
                 yield BetterCheckbox(
-                    'Display plot interactively',
+                    'Display plot',
                     plotting.get('show_plot', False),
                     id='plot-show-checkbox',
                     classes='field-checkbox',
                 )
 
-            # Save name
+            # Save format
+            save_format = plotting.get('save_format', 'pdf')
+            formats = [('PDF', 'pdf'), ('PNG', 'png'), ('JPG', 'jpg'), ('SVG', 'svg')]
             with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Save Filename')
-                    yield InfoIcon(
-                        'Filename template for saved plots\n'
-                        '{catalog_name} and {size_pix} placeholders available'
-                    )
-                    yield Label(':')
-                yield Input(
-                    value=plotting.get('save_name', '{catalog_name}_cutouts_{size_pix}.png'),
-                    id='plot-save-name',
-                    classes='field-input-wide',
+                yield Label('Save Format:', classes='field-label')
+                yield Select(
+                    formats,
+                    value=save_format,
+                    id='plot-save-format',
+                    classes='field-input',
                 )
 
             yield Static('RGB Scaling', classes='section-title')
@@ -1060,21 +1057,19 @@ Tips:
 
         # Plotting
         plot_bands = self.query_one('#rgb-band-selector', RGBBandSelector).get_selected_bands()
-        if not plot_bands:
-            plot_bands = ['whigs-g', 'cfis-r', 'ps-i']
+        # Empty list means None (use runtime bands)
+        plot_bands_value = plot_bands if plot_bands else None
 
         config['plotting'] = {
             'catalog_name': self._get_input_value('#plot-catalog-name', 'catalog'),
-            'bands': plot_bands,
+            'bands': plot_bands_value,
             'size_pix': int(self._get_input_value('#plot-size', '512')),
             'mode': str(self.query_one('#plot-mode', Select).value),
             'max_cols': int(self._get_input_value('#plot-max-cols', '5')),
             'figsize': None,
             'save_plot': self.query_one('#plot-save-checkbox', BetterCheckbox).value,
             'show_plot': self.query_one('#plot-show-checkbox', BetterCheckbox).value,
-            'save_name': self._get_input_value(
-                '#plot-save-name', '{catalog_name}_cutouts_{size_pix}.png'
-            ),
+            'save_format': str(self.query_one('#plot-save-format', Select).value),
             'rgb': {
                 'scaling_type': str(self.query_one('#rgb-scaling-type', Select).value),
                 'stretch': float(self._get_input_value('#rgb-stretch', '125.0')),
@@ -1160,8 +1155,10 @@ Tips:
 
         # Validate plotting bands (should be exactly 3 in correct order)
         rgb_selector = self.query_one('#rgb-band-selector', RGBBandSelector)
-        if not rgb_selector.is_complete():
-            errors.append('All three RGB bands must be selected for plotting')
+        selected_rgb = rgb_selector.get_selected_bands()
+        if selected_rgb and len(selected_rgb) != 3:
+            # Partial selection is invalid - must be all 3 or none
+            errors.append('RGB bands must be either all 3 selected or empty (to use runtime bands)')
 
         # Validate paths
         cert_path = self.query_one('#path-cert', PathInput)

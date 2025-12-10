@@ -10,8 +10,13 @@ All notable changes to this project will be documented in this file.
 - post-download cutout creation, store in hdf5 files
 - retry logic for downloads
 - plotting routine for cutouts (unionsdata plot)
-- integrate config validation into unionsdata edit and remove unionsdata validate
 - download progress bar
+- terminal user interface (TUI) for download configuration
+- automatically detect most recent object catalog for plotting
+
+### Changed
+- integrate config validation into unionsdata edit and remove unionsdata validate
+- unionsdata config calls TUI and effectively replaces unionsdata edit
 
 ## [0.1.1] - 2025-10-31
 
