@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.color import Color
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Button, Input, Static
@@ -43,7 +44,6 @@ class PathInput(Static):
     PathInput .path-status.invalid { color: $error; }
     PathInput .path-status.warning { color: $warning; }
 
-    /* Added style for the injected button */
     PathInput Button {
         height: 100%;
         min-width: 7;
@@ -53,13 +53,13 @@ class PathInput(Static):
     }
 
     PathInput .path-tooltip {
-        width: auto;      /* Was: 1fr */
-        max-width: 1fr;   /* Allow it to grow but share space */
+        width: auto;
+        max-width: 1fr;
         height: 100%;
         content-align: left middle;
         color: $text-muted;
         padding-left: 1;
-        padding-right: 1; /* Add some spacing before the button */
+        padding-right: 1;
     }
     """
 
@@ -93,18 +93,17 @@ class PathInput(Static):
         self._placeholder = placeholder
         self._is_certificate = is_certificate
         self._action_button = action_button
-
-        # 1. Determine the correct validator
+        self._pulsing = False
         self._validator: Validator | None = None
 
         if is_certificate:
-            self._validator = CertificateValidator(warning_days=2)
+            self._validator = CertificateValidator(warning_days=1)
         elif must_exist:
             self._validator = PathExistsValidator(
                 must_be_file=must_be_file, must_be_dir=must_be_dir
             )
         else:
-            # If path doesn't need to exist, we only check if it is empty
+            # if path doesn't need to exist, we only check if it is empty
             self._validator = NonEmptyValidator()
 
     def compose(self) -> ComposeResult:
@@ -131,43 +130,112 @@ class PathInput(Static):
             self._update_ui_state(event.validation_result)
             self.post_message(self.Changed(self, event.value))
 
+    def _start_pulse(self, color_name: str) -> None:
+        """Start a pulsing tint animation on the action button."""
+        btn = self._action_button
+        if not btn:
+            return
+
+        self._pulsing = True
+
+        # fetch CSS variables to get exact theme colors (e.g. $error, $warning)
+        css_vars = self.app.get_css_variables()
+        raw_target = css_vars.get(color_name, color_name)
+
+        try:
+            base_color = Color.parse(raw_target)
+        except Exception:
+            # Fallback if parsing fails
+            base_color = Color.parse('#FF0000')
+
+        # Pulse between 0% tint (original look) and 80% tint (alert overlay)
+        tint_low = base_color.with_alpha(0.0)
+        tint_high = base_color.with_alpha(0.5)
+
+        def animate_up() -> None:
+            if not self._pulsing:
+                return
+            btn.styles.animate(
+                'tint',
+                value=tint_high,
+                duration=1.0,
+                easing='in_out_cubic',
+                on_complete=animate_down,
+            )
+
+        def animate_down() -> None:
+            if not self._pulsing:
+                return
+            btn.styles.animate(
+                'tint', value=tint_low, duration=1.0, easing='in_out_cubic', on_complete=animate_up
+            )
+
+        # Start animation sequence
+        btn.styles.tint = tint_low
+        animate_up()
+
+    def _stop_pulse(self) -> None:
+        """Stop any active animation and reset styles."""
+        self._pulsing = False  # stop the animation loop
+
+        if not self._action_button:
+            return
+
+        btn = self._action_button
+
+        # stop pulsing
+        btn.styles.tint = None
+
+        def ensure_reset() -> None:
+            if not self._pulsing:
+                btn.styles.tint = None
+
+        # reset the button to neutral state
+        self.set_timer(0.1, ensure_reset)
+
     def _update_ui_state(self, result: ValidationResult | None) -> None:
         status_widget = self.query_one('.path-status', Static)
         tooltip_widget = self.query_one('.path-tooltip', Static)
         input_widget = self.query_one(Input)
 
-        # Clear explicit warning class first
+        # Clear explicit warning class
         input_widget.remove_class('warning')
         status_widget.remove_class('valid', 'invalid', 'warning')
+        self._stop_pulse()
 
-        # 1. EMPTY CASE (Handled natively by NonEmptyValidator -> Invalid)
+        # certificate is valid
         if not result or result.is_valid:
-            # --- VALID CASE ---
-
-            # Special Check: Certificate Warnings (Orange)
             warning_msg = None
             if self._is_certificate and isinstance(self._validator, CertificateValidator):
+                # check if cert is expiring soon
                 warning_msg = self._validator.get_expiry_warning(self.value)
 
             if warning_msg:
-                # Warning State: Orange Icon + Message
-                status_widget.update('⚠')
+                # warning icon + message
+                status_widget.update('⚠️')
                 status_widget.add_class('warning')
                 input_widget.add_class('warning')
                 tooltip_widget.update(warning_msg)
+
+                # Pulse the button yellow to indicate the certificate is expiring soon and should be renewed soon
+                if self._action_button:
+                    self._start_pulse('warning')
             else:
                 # Standard State: Green Border (Automatic) + NO Icon
                 status_widget.update('')
                 tooltip_widget.update('')
-
+        # certificate is invalid
         else:
-            # --- INVALID CASE (Red) ---
-            # Input is already Red because of native validation
             status_widget.update('✗')
             status_widget.add_class('invalid')
 
+            # get failure message
             msg = result.failure_descriptions[0] if result.failure_descriptions else ''
             tooltip_widget.update(msg)
+
+            # pulse the button red to indicate error (missing/expired certificate). renewal needed.
+            if self._action_button and self._is_certificate:
+                self._start_pulse('error')
 
     def set_value(self, value: str) -> None:
         self.value = value
@@ -175,13 +243,13 @@ class PathInput(Static):
 
     def force_validate(self) -> None:
         """Manually trigger validation to update UI. We need this after renewing or creating a certificate."""
-        # Get the inner Input widget
+        # get the inner input widget
         input_widget = self.query_one(Input)
 
-        # This checks the file on disk *now*
+        # this checks the file on disk *now*
         result = input_widget.validate(self.value)
 
-        # Update the Red X / Green Check UI
+        # remove any error/warning states if fixed
         self._update_ui_state(result)
 
     def is_valid(self) -> bool:

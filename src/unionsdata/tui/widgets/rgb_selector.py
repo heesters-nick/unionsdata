@@ -128,7 +128,7 @@ class RGBBandSelector(Static):
             with Vertical(id='wrap_red', classes='band-wrapper red-band field-input'):
                 yield Select[str]([], prompt='Red (Long)', id='sel_red')
 
-            yield Button('Reset', variant='default', id='reset-btn')
+            yield Button('🔄 Reset', variant='default', id='reset-btn')
 
     def on_mount(self) -> None:
         """Initialize."""

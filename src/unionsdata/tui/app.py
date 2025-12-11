@@ -207,7 +207,7 @@ class RenewCertificateDialog(ModalScreen[dict[str, Any] | None]):
             yield Static('', id='status-message')
 
             with Horizontal(classes='buttons'):
-                yield Button('Create/Renew', variant='primary', id='btn-renew', disabled=True)
+                yield Button('🌱 Create/Renew', variant='primary', id='btn-renew', disabled=True)
                 yield Button('✗ Cancel', variant='error', id='btn-cancel')
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -226,6 +226,17 @@ class RenewCertificateDialog(ModalScreen[dict[str, Any] | None]):
             self.dismiss(None)
         elif event.button.id == 'btn-renew':
             self._start_renewal()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in input fields."""
+        if event.input.id == 'renew-username':
+            # Move focus to password field
+            self.query_one('#renew-password', Input).focus()
+        elif event.input.id == 'renew-password':
+            # Submit if ready
+            btn = self.query_one('#btn-renew', Button)
+            if not btn.disabled:
+                self._start_renewal()
 
     def _start_renewal(self) -> None:
         username = self.query_one('#renew-username', Input).value.strip()
@@ -1026,7 +1037,7 @@ class ConfigEditorApp(App[None]):
                     is_certificate=True,
                     id='path-cert',
                     # Create button here and pass it in
-                    action_button=Button('Create/Renew', id='btn-open-renew', variant='default'),
+                    action_button=Button('🌱 Create/Renew', id='btn-open-renew', variant='default'),
                 )
 
     # ==================== Event Handlers ====================
@@ -1159,7 +1170,7 @@ class ConfigEditorApp(App[None]):
         if result and result.get('success'):
             path = result['path']
 
-            # 1. Update the UI with the AUTO-DETECTED path
+            # update the UI with the auto-detected path
             try:
                 cert_input = self.query_one('#path-cert', PathInput)
                 cert_input.set_value(path)
@@ -1167,7 +1178,7 @@ class ConfigEditorApp(App[None]):
             except Exception:
                 pass
 
-            # 2. Show notification
+            # show notification
             msg = f'Certificate saved successfully.\nLocation: {path}'
             self.notify(msg, title='Success', severity='information', timeout=5.0)
 

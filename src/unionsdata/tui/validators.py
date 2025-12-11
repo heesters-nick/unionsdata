@@ -112,10 +112,7 @@ class CertificateValidator(Validator):
             time_left = expiry - datetime.now(UTC)
 
             if time_left.total_seconds() < 0:
-                msg = (
-                    f'Certificate EXPIRED on {expiry.date()}. '
-                    'Renew it using cadc-get-cert -u YOUR_CANFAR_USERNAME.'
-                )
+                msg = f'Certificate EXPIRED on {expiry.date()}.'
                 return self.failure(msg)
 
             return self.success()
@@ -132,11 +129,15 @@ class CertificateValidator(Validator):
             time_left = expiry - datetime.now(UTC)
 
             if 0 < time_left.total_seconds() < timedelta(days=self.warning_days).total_seconds():
-                hours = int(time_left.total_seconds() / 3600)
-                return (
-                    f'Certificate expires in {hours} hours. '
-                    'Renew it using cadc-get-cert -u YOUR_CANFAR_USERNAME.'
-                )
+                total_hours = int(time_left.total_seconds() / 3600)
+                if total_hours >= 48:
+                    days = total_hours // 24
+                    return f'Certificate expires in {days} days.'
+                elif total_hours >= 1:
+                    return f'Certificate expires in {total_hours} hours.'
+                else:
+                    minutes = int(time_left.total_seconds() / 60)
+                    return f'Certificate expires in {minutes} minutes!'
         except Exception:
             pass
         return None
