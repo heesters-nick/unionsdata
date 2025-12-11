@@ -154,6 +154,7 @@ class PathInput(Static):
 
         def animate_up() -> None:
             if not self._pulsing:
+                btn.styles.tint = None
                 return
             btn.styles.animate(
                 'tint',
@@ -165,6 +166,7 @@ class PathInput(Static):
 
         def animate_down() -> None:
             if not self._pulsing:
+                btn.styles.tint = None
                 return
             btn.styles.animate(
                 'tint', value=tint_low, duration=1.0, easing='in_out_cubic', on_complete=animate_up
