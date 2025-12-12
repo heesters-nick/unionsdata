@@ -331,6 +331,87 @@ class RenewCertificateDialog(ModalScreen[dict[str, Any] | None]):
             status.remove_class('error')
 
 
+class NewProfileDialog(ModalScreen[str | None]):
+    """Dialog to create a new profile."""
+
+    DEFAULT_CSS = """
+    NewProfileDialog {
+        align: center middle;
+    }
+
+    NewProfileDialog > Vertical {
+        background: $surface;
+        border: thick $primary;
+        padding: 1 2;
+        width: 60;
+        height: auto;
+    }
+
+    NewProfileDialog .title {
+        text-style: bold;
+        margin-bottom: 1;
+        text-align: center;
+    }
+
+    NewProfileDialog .buttons {
+        margin-top: 2;
+        align: center middle;
+        height: 3;
+    }
+
+    NewProfileDialog Button {
+        margin: 0 1;
+    }
+
+    #btn-create:disabled,
+    #btn-create:disabled:hover {
+        opacity: 0.4 !important;
+        tint: 0% !important;
+        border: none !important; /* Removes the 3D border that shimmers on hover */
+        background: $primary !important; /* Locks background color */
+        height: 3 !important; /* Enforce height since border removal might shrink it */
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static('Create New Profile', classes='title')
+            yield Input(
+                placeholder='Profile Name (e.g., cluster_x)',
+                id='profile-name',
+                validators=[NonEmptyValidator()],
+            )
+            with Horizontal(classes='buttons'):
+                yield Button('🌱 Create', variant='primary', id='btn-create', disabled=True)
+                yield Button('✗ Cancel', variant='error', id='btn-cancel')
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Enable the create button only when the field is filled."""
+        try:
+            name = self.query_one('#profile-name', Input).value.strip()
+
+            # Enable button only if field has text
+            self.query_one('#btn-create', Button).disabled = not bool(name)
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == 'btn-cancel':
+            self.dismiss(None)
+        elif event.button.id == 'btn-create':
+            self._submit()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._submit()
+
+    def _submit(self) -> None:
+        name = self.query_one('#profile-name', Input).value.strip()
+        if name:
+            self.dismiss(name)
+        else:
+            self.notify('Profile name cannot be empty', severity='error')
+
+
 class ConfigEditorApp(App[None]):
     """Textual application for editing unionsdata configuration."""
 
@@ -351,6 +432,7 @@ class ConfigEditorApp(App[None]):
         self._config_data: dict[str, Any] = {}
         self._dirty = False
         self._load_config()
+        self._previous_machine = self._config_data.get('machine', 'local')
 
     def _load_config(self) -> None:
         """Load configuration from file or use defaults."""
@@ -490,10 +572,13 @@ class ConfigEditorApp(App[None]):
             machines = list(cfg.get('paths_by_machine', {'local': {}}).keys())
             current_machine = cfg.get('machine', 'local')
 
+            options = [(m, m) for m in machines]
+            options.append(('+ create new...', 'create_new'))
+
             with Horizontal(classes='field-row'):
                 yield Label('Machine:', classes='field-label')
                 yield Select(
-                    [(m, m) for m in machines],
+                    options,
                     value=current_machine,
                     id='machine-select',
                     classes='field-input',
@@ -1025,7 +1110,7 @@ class ConfigEditorApp(App[None]):
                 with Horizontal(classes='field-label'):
                     yield Label('Certificate Path')
                     yield InfoIcon(
-                        'CADC proxy certificate. Generate by pressing the Create/Renew button to the right'
+                        'Path to CADC certificate. Generate a certificate by pressing the Create/Renew button to the right. The certificate path will be filled out automatically after creation.'
                     )
                     yield Label(':')
 
@@ -1067,7 +1152,13 @@ class ConfigEditorApp(App[None]):
 
         # Handle machine change
         elif event.select.id == 'machine-select':
-            self._update_paths_for_machine(str(event.value))
+            if event.value == 'create_new':
+                # Open the dialog
+                self.push_screen(NewProfileDialog(), self._handle_new_profile)
+            else:
+                self._update_paths_for_machine(str(event.value))
+                self._previous_machine = str(event.value)
+                self._refresh_catalog_options()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -1103,6 +1194,10 @@ class ConfigEditorApp(App[None]):
         """Track path input changes."""
         self._dirty = True
         self._update_header()
+
+        # If the tables directory changes, refresh the catalog dropdown
+        if event.control.id == 'path-tables':
+            self._refresh_catalog_options()
 
     # ==================== Actions ====================
 
@@ -1151,6 +1246,50 @@ class ConfigEditorApp(App[None]):
         """
         if quit:
             self.exit()
+
+    def _handle_new_profile(self, name: str | None) -> None:
+        """Handle the creation of a new machine profile."""
+        select = self.query_one('#machine-select', Select)
+
+        # handle cancellation
+        if not name:
+            select.value = self._previous_machine
+            return
+
+        # handle duplicate name
+        if name in self._config_data.get('paths_by_machine', {}):
+            self.notify(f"Profile '{name}' already exists", severity='error')
+            select.value = self._previous_machine
+            return
+
+        # create new entry in config
+        if 'paths_by_machine' not in self._config_data:
+            self._config_data['paths_by_machine'] = {}
+
+        self._config_data['paths_by_machine'][name] = {
+            'root_dir_main': '',
+            'root_dir_data': '',
+            'dir_tables': '',
+            'dir_figures': '',
+            'cert_path': '',
+        }
+
+        # update select options
+        # we must regenerate the options list to include the new key
+        machines = list(self._config_data['paths_by_machine'].keys())
+        options = [(m, m) for m in machines]
+        options.append(('+ Create New Profile...', 'create_new'))
+        select.set_options(options)
+
+        # select the new profile and switch tabs
+        # this will trigger on_select_changed again, which will call _update_paths_for_machine
+        select.value = name
+        self._previous_machine = name
+
+        # Switch to the Paths tab so user can start editing
+        self.query_one(TabbedContent).active = 'paths-tab'
+
+        self.notify(f"Created profile '{name}'. Please configure paths.")
 
     def action_quit_app(self) -> None:
         """Quit the application, prompting if there are unsaved changes."""
@@ -1294,6 +1433,28 @@ Tips:
             pass
 
         return options
+
+    def _refresh_catalog_options(self) -> None:
+        """Refresh the catalog options based on the current tables directory."""
+        try:
+            # get the widget
+            try:
+                catalog_select = self.query_one('#plot-catalog-name', Select)
+            except Exception:
+                return
+
+            # get the new options based on the current path input
+            options = self._get_catalog_options()
+
+            # update options
+            catalog_select.set_options(options)
+
+            # if the selection became empty (BLANK), force it to 'auto'.
+            if catalog_select.value == Select.BLANK:
+                catalog_select.value = 'auto'
+
+        except Exception:
+            pass
 
     def _collect_all_values(self) -> dict[str, Any]:
         """Collect all widget values into a configuration dictionary."""
