@@ -10,13 +10,13 @@
 machine: local                                                     # canfar | narval | local
 
 logging:
-  name: cutouts_cfis-r
+  name: my_unionsdata_log
   level: INFO
 
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: ["whigs-g", 'cfis-r', 'ps-i']                             # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: null                                                      # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
@@ -33,6 +33,7 @@ cutouts:
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
+  enable: false                                                    # create plots of cutouts
   catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
   bands: null                                                      # bands to use for RGB cutouts; null = first 3 from runtime.bands
   size_pix: 512                                                    # square size of cutouts in pixels

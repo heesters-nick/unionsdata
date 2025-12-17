@@ -314,3 +314,14 @@ CollapsibleTitle {
     min-width: 8;
     margin-left: 1;
 }
+
+#plot-mono-container,
+#plot-rgb-container {
+    height: auto;
+    width: 100%;
+}
+
+#plotting-content {
+    height: auto;
+    width: 100%;
+}

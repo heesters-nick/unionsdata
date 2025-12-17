@@ -45,6 +45,7 @@ cutouts:
     output_subdir: "cutouts"
 
 plotting:
+  enable: true
   catalog_name: 'test_catalog'
   bands: ["whigs-g", 'cfis_lsb-r', 'ps-i']
   size_pix: 256

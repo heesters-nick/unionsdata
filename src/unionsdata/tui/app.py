@@ -23,6 +23,7 @@ from textual.widgets import (
     Label,
     Select,
     Static,
+    Switch,
     TabbedContent,
     TabPane,
 )
@@ -38,6 +39,7 @@ from unionsdata.tui.widgets import (
     RGBBandSelector,
     TileList,
 )
+from unionsdata.tui.widgets.rgb_selector import BANDS
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +470,7 @@ class ConfigEditorApp(App[None]):
             'runtime': {
                 'n_download_threads': 12,
                 'n_cutout_processes': 2,
-                'bands': ['cfis-r'],
+                'bands': None,
                 'resume': False,
                 'max_retries': 5,
             },
@@ -485,6 +487,7 @@ class ConfigEditorApp(App[None]):
                 'output_subdir': 'cutouts',
             },
             'plotting': {
+                'enable': False,
                 'catalog_name': 'catalog',
                 'bands': None,
                 'size_pix': 512,
@@ -660,6 +663,7 @@ class ConfigEditorApp(App[None]):
         """Compose the Bands settings tab."""
         # Get bands from runtime config
         runtime = self._config_data.get('runtime', {})
+        current_bands = runtime.get('bands') or []
 
         with ScrollableContainer():
             with Horizontal(classes='section-title'):
@@ -668,7 +672,7 @@ class ConfigEditorApp(App[None]):
 
             # BandSelector moved here
             yield BandSelector(
-                selected=runtime.get('bands', ['cfis-r']),
+                selected=current_bands,
                 min_selected=1,
                 id='band-selector',
             )
@@ -781,185 +785,226 @@ class ConfigEditorApp(App[None]):
     def _compose_plotting_tab(self) -> ComposeResult:
         """Compose the Plotting settings tab."""
         plotting = self._config_data.get('plotting', {})
+        # Get the enable state
+        is_enabled = plotting.get('enable', False)
+
         rgb = plotting.get('rgb', {})
 
+        # get initial plot bands from config
+        plot_bands = plotting.get('bands') or []
+        # if 3 or more bands are set, default to RGB mode
+        is_rgb = len(plot_bands) >= 3
+
         with ScrollableContainer():
-            yield Static('Plotting Configuration', classes='section-title')
-
-            # Catalog name
+            # enable plotting switch
+            yield Static('Plotting Module', classes='section-title')
             with Horizontal(classes='field-row'):
                 with Horizontal(classes='field-label'):
-                    yield Label('Catalog Name')
+                    yield Label('Enable Plotting')
                     yield InfoIcon(
-                        'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
+                        'Enable or disable cutout plotting after creation. See Cutouts section.'
                     )
                     yield Label(':')
+                yield Switch(value=is_enabled, id='plot-enable-switch')
+            with Vertical(id='plotting-content', classes='' if is_enabled else 'hidden'):
+                with ScrollableContainer():
+                    # general plotting config
+                    yield Static('General Plotting Configuration', classes='section-title')
 
-                current_catalog = plotting.get('catalog_name', 'auto')
-                options = self._get_catalog_options()
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Catalog Name')
+                            yield InfoIcon(
+                                'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
+                            )
+                            yield Label(':')
 
-                existing_values = {opt[1] for opt in options}
-                if current_catalog and current_catalog not in existing_values:
-                    options.append((current_catalog, current_catalog))
+                        current_catalog = plotting.get('catalog_name', 'auto')
+                        options = self._get_catalog_options()
+                        # Ensure current value is in options
+                        existing_values = {opt[1] for opt in options}
+                        if current_catalog and current_catalog not in existing_values:
+                            options.append((current_catalog, current_catalog))
 
-                yield Select(
-                    options,
-                    value=current_catalog,
-                    id='plot-catalog-name',
-                    classes='field-input',
-                )
+                        yield Select(
+                            options,
+                            value=current_catalog,
+                            id='plot-catalog-name',
+                            classes='field-input',
+                        )
 
-            # RGB Band Selection; none = will use first three runtime bands
-            plot_bands = plotting.get('bands') or []
+                    # cutout size
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Size (pixels)')
+                            yield InfoIcon(
+                                'Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)'
+                            )
+                            yield Label(':')
+                        yield Input(
+                            value=str(plotting.get('size_pix', 512)),
+                            id='plot-size',
+                            classes='field-input',
+                            validators=[IntegerRange(1, 10000)],
+                        )
 
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('RGB Bands')
-                    yield InfoIcon(
-                        'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
-                    )
-                    yield Label(':')
+                    # Max columns
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Max Columns')
+                            yield InfoIcon('Maximum columns in grid mode')
+                            yield Label(':')
+                        yield Input(
+                            value=str(plotting.get('max_cols', 5)),
+                            id='plot-max-cols',
+                            classes='field-input',
+                            validators=[IntegerRange(1, 20)],
+                        )
 
-                # New Widget Integration
-                yield RGBBandSelector(selected_bands=plot_bands, id='rgb-band-selector')
+                    with Horizontal(classes='field-row'):
+                        yield Label('Save Plot:', classes='field-label')
+                        yield BetterCheckbox(
+                            'Save to disk',
+                            plotting.get('save_plot', True),
+                            id='plot-save-checkbox',
+                            classes='field-checkbox',
+                        )
 
-            # Plot size
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Size (pixels)')
-                    yield InfoIcon('Square cutout size in pixels')
-                    yield Label(':')
-                yield Input(
-                    value=str(plotting.get('size_pix', 512)),
-                    id='plot-size',
-                    classes='field-input',
-                    validators=[IntegerRange(1, 10000)],
-                )
+                    with Horizontal(classes='field-row'):
+                        yield Label('Show Plot:', classes='field-label')
+                        yield BetterCheckbox(
+                            'Display plot',
+                            plotting.get('show_plot', False),
+                            id='plot-show-checkbox',
+                            classes='field-checkbox',
+                        )
 
-            # Mode
-            mode = plotting.get('mode', 'grid')
-            modes = [('Grid', 'grid'), ('Channel', 'channel')]
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Display Mode')
-                    yield InfoIcon('grid: thumbnails; channel: show R,G,B separately')
-                    yield Label(':')
-                yield Select(
-                    modes,
-                    value=mode,
-                    id='plot-mode',
-                    classes='field-input',
-                )
+                    save_format = plotting.get('save_format', 'pdf')
+                    formats = [('PDF', 'pdf'), ('PNG', 'png'), ('JPG', 'jpg'), ('SVG', 'svg')]
+                    with Horizontal(classes='field-row'):
+                        yield Label('Save Format:', classes='field-label')
+                        yield Select(
+                            formats, value=save_format, id='plot-save-format', classes='field-input'
+                        )
 
-            # Max columns
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Max Columns')
-                    yield InfoIcon('Maximum columns in grid mode')
-                    yield Label(':')
-                yield Input(
-                    value=str(plotting.get('max_cols', 5)),
-                    id='plot-max-cols',
-                    classes='field-input',
-                    validators=[IntegerRange(1, 20)],
-                )
+                    # --- MODE SWITCH ---
+                    yield Static('Plot Mode', classes='section-title')
+                    with Horizontal(classes='field-row'):
+                        yield Label('Monochromatic', classes='field-label')
+                        # The Switch that controls visibility
+                        yield Switch(value=is_rgb, id='plot-mode-switch')
+                        yield Label('RGB', classes='field-label')
 
-            # Save plot
-            with Horizontal(classes='field-row'):
-                yield Label('Save Plot:', classes='field-label')
-                yield BetterCheckbox(
-                    'Save plot to disk',
-                    plotting.get('save_plot', True),
-                    id='plot-save-checkbox',
-                    classes='field-checkbox',
-                )
+                    # --- MONO CONTAINER (Hidden if RGB) ---
+                    with Vertical(id='plot-mono-container', classes='hidden' if is_rgb else ''):
+                        yield Static('Monochromatic Plotting Options', classes='section-title')
+                        # Single Band Selector (All known bands)
+                        all_band_opts = [(b.display, b.name) for b in BANDS]
+                        with Horizontal(classes='field-row'):
+                            yield Label('Band:', classes='field-label')
+                            yield Select(
+                                all_band_opts,
+                                value=plot_bands[0] if plot_bands else Select.BLANK,
+                                id='plot-mono-band',
+                                classes='field-input',
+                            )
 
-            # Show plot
-            with Horizontal(classes='field-row'):
-                yield Label('Show Plot:', classes='field-label')
-                yield BetterCheckbox(
-                    'Display plot',
-                    plotting.get('show_plot', False),
-                    id='plot-show-checkbox',
-                    classes='field-checkbox',
-                )
+                    # --- RGB CONTAINER (Hidden if Mono) ---
+                    with Vertical(id='plot-rgb-container', classes='' if is_rgb else 'hidden'):
+                        yield Static('RGB Plotting Options', classes='section-title')
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('RGB Bands')
+                                yield InfoIcon(
+                                    'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
+                                )
+                                yield Label(':')
 
-            # Save format
-            save_format = plotting.get('save_format', 'pdf')
-            formats = [('PDF', 'pdf'), ('PNG', 'png'), ('JPG', 'jpg'), ('SVG', 'svg')]
-            with Horizontal(classes='field-row'):
-                yield Label('Save Format:', classes='field-label')
-                yield Select(
-                    formats,
-                    value=save_format,
-                    id='plot-save-format',
-                    classes='field-input',
-                )
+                            # New Widget Integration
+                            yield RGBBandSelector(
+                                selected_bands=plot_bands,
+                                id='rgb-band-selector',
+                            )
 
-            yield Static('RGB Scaling', classes='section-title')
+                        # Display Mode is only relevant for RGB
+                        mode = plotting.get('mode', 'grid')
+                        modes = [('Grid', 'grid'), ('Channel', 'channel')]
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Display Mode')
+                                yield InfoIcon('Grid: thumbnails; Channel: show R,G,B separately')
+                                yield Label(':')
+                            yield Select(
+                                modes,
+                                value=mode,
+                                id='plot-mode',
+                                classes='field-input',
+                            )
 
-            # Scaling type
-            scaling_type = rgb.get('scaling_type', 'asinh')
-            scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Scaling Type')
-                    yield InfoIcon('asinh preserves both bright and faint details')
-                    yield Label(':')
-                yield Select(
-                    scaling_types,
-                    value=scaling_type,
-                    id='rgb-scaling-type',
-                    classes='field-input',
-                )
+                        # RGB Specific Scaling
+                        scaling_type = rgb.get('scaling_type', 'asinh')
+                        scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Scaling Type')
+                                yield InfoIcon('asinh preserves both bright and faint details')
+                                yield Label(':')
+                            yield Select(
+                                scaling_types,
+                                value=scaling_type,
+                                id='rgb-scaling-type',
+                                classes='field-input',
+                            )
 
-            # Stretch
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Stretch')
-                    yield InfoIcon('Scaling factor controlling overall brightness')
-                    yield Label(':')
-                yield Input(
-                    value=str(rgb.get('stretch', 125.0)),
-                    id='rgb-stretch',
-                    classes='field-input',
-                )
+                        # Stretch
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Stretch')
+                                yield InfoIcon('Scaling factor controlling overall brightness')
+                                yield Label(':')
+                            yield Input(
+                                value=str(rgb.get('stretch', 125.0)),
+                                id='rgb-stretch',
+                                classes='field-input',
+                            )
 
-            # Q
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Q')
-                    yield InfoIcon('Softening parameter for asinh (higher = more linear)')
-                    yield Label(':')
-                yield Input(
-                    value=str(rgb.get('Q', 7.0)),
-                    id='rgb-q',
-                    classes='field-input',
-                )
+                        # Q
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Q')
+                                yield InfoIcon(
+                                    'Softening parameter for asinh (higher = more linear)'
+                                )
+                                yield Label(':')
+                            yield Input(
+                                value=str(rgb.get('Q', 7.0)),
+                                id='rgb-q',
+                                classes='field-input',
+                            )
 
-            # Gamma
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Gamma')
-                    yield InfoIcon('Gamma correction (lower = enhances faint features)')
-                    yield Label(':')
-                yield Input(
-                    value=str(rgb.get('gamma', 0.25)),
-                    id='rgb-gamma',
-                    classes='field-input',
-                )
+                        # Gamma
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Gamma')
+                                yield InfoIcon('Gamma correction (lower = enhances faint features)')
+                                yield Label(':')
+                            yield Input(
+                                value=str(rgb.get('gamma', 0.25)),
+                                id='rgb-gamma',
+                                classes='field-input',
+                            )
 
-            # Standard ZP
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Standard ZP')
-                    yield InfoIcon('Standard zero-point for flux normalization')
-                    yield Label(':')
-                yield Input(
-                    value=str(rgb.get('standard_zp', 30.0)),
-                    id='rgb-standard-zp',
-                    classes='field-input',
-                )
+                        # Standard ZP
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Standard ZP')
+                                yield InfoIcon('Standard zero-point for flux normalization')
+                                yield Label(':')
+                            yield Input(
+                                value=str(rgb.get('standard_zp', 30.0)),
+                                id='rgb-standard-zp',
+                                classes='field-input',
+                            )
 
     def _compose_inputs_tab(self) -> ComposeResult:
         """Compose the Inputs settings tab."""
@@ -1171,7 +1216,7 @@ class ConfigEditorApp(App[None]):
             self.push_screen(RenewCertificateDialog(), self._handle_renew_result)
 
     def on_band_selector_changed(self, event: BandSelector.Changed) -> None:
-        """Track band selection changes."""
+        """Track band selection changes and auto-toggle plotting mode."""
         self._dirty = True
         self._update_header()
 
@@ -1198,6 +1243,40 @@ class ConfigEditorApp(App[None]):
         # If the tables directory changes, refresh the catalog dropdown
         if event.control.id == 'path-tables':
             self._refresh_catalog_options()
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle switch changes (Plot Mode)."""
+        # master enable switch for plotting
+        if event.switch.id == 'plot-enable-switch':
+            is_enabled = event.value
+            content = self.query_one('#plotting-content')
+
+            if is_enabled:
+                content.remove_class('hidden')
+            else:
+                content.add_class('hidden')
+
+            self._dirty = True
+            self._update_header()
+
+        # switch between RGB and Mono plotting modes
+        if event.switch.id == 'plot-mode-switch':
+            is_rgb = event.value
+
+            mono = self.query_one('#plot-mono-container')
+            rgb = self.query_one('#plot-rgb-container')
+
+            if is_rgb:
+                # RGB Mode: Hide Mono, Show RGB
+                mono.add_class('hidden')
+                rgb.remove_class('hidden')
+            else:
+                # Mono Mode: Hide RGB, Show Mono
+                rgb.add_class('hidden')
+                mono.remove_class('hidden')
+
+            self._dirty = True
+            self._update_header()
 
     # ==================== Actions ====================
 
@@ -1460,10 +1539,10 @@ Tips:
         """Collect all widget values into a configuration dictionary."""
         config: dict[str, Any] = {}
 
-        # Start with existing config to preserve bands dict and other sections
+        # start with existing config to preserve bands dict and other sections
         config = dict(self._config_data)
 
-        # General
+        # general
         try:
             config['machine'] = str(self.query_one('#machine-select', Select).value)
         except Exception:
@@ -1474,7 +1553,7 @@ Tips:
             'level': str(self.query_one('#logging-level', Select).value),
         }
 
-        # Runtime
+        # runtime
         config['runtime'] = {
             'n_download_threads': int(self._get_input_value('#n-download-threads', '12')),
             'n_cutout_processes': int(self._get_input_value('#n-cutout-processes', '2')),
@@ -1483,7 +1562,7 @@ Tips:
             'max_retries': int(self._get_input_value('#max-retries', '5')),
         }
 
-        # Tiles
+        # tiles
         config['tiles'] = {
             'update_tiles': self.query_one('#update-tiles-checkbox', BetterCheckbox).value,
             'show_tile_statistics': self.query_one(
@@ -1495,7 +1574,7 @@ Tips:
             ).value,
         }
 
-        # Cutouts
+        # cutouts
         config['cutouts'] = {
             'enable': self.query_one('#cutouts-enable-checkbox', BetterCheckbox).value,
             'cutouts_only': self.query_one('#cutouts-only-checkbox', BetterCheckbox).value,
@@ -1503,12 +1582,22 @@ Tips:
             'output_subdir': self._get_input_value('#cutout-subdir', 'cutouts'),
         }
 
-        # Plotting
-        plot_bands = self.query_one('#rgb-band-selector', RGBBandSelector).get_selected_bands()
-        # Empty list means None (use runtime bands)
-        plot_bands_value = plot_bands if plot_bands else None
+        # plotting
+        # determine if we are in RGB or Mono mode
+        is_rgb = self.query_one('#plot-mode-switch', Switch).value
+
+        if is_rgb:
+            # rgb mode: get 3 bands
+            rgb_bands = self.query_one('#rgb-band-selector', RGBBandSelector).get_selected_bands()
+            plot_bands_value = rgb_bands if rgb_bands else None
+        else:
+            # mono mode: get 1 band
+            mono_band = str(self.query_one('#plot-mono-band', Select).value)
+            # save as a list of 1 string for config consistency
+            plot_bands_value = [mono_band] if mono_band != Select.BLANK else None
 
         config['plotting'] = {
+            'enable': self.query_one('#plot-enable-switch', Switch).value,
             'catalog_name': str(self.query_one('#plot-catalog-name', Select).value),
             'bands': plot_bands_value,
             'size_pix': int(self._get_input_value('#plot-size', '512')),
@@ -1527,7 +1616,7 @@ Tips:
             },
         }
 
-        # Inputs
+        # inputs
         source = str(self.query_one('#input-source-select', Select).value)
         config['inputs'] = {
             'source': source,
@@ -1546,7 +1635,7 @@ Tips:
             },
         }
 
-        # Paths - update for current machine only
+        # paths - update for current machine only
         machine = config['machine']
         if 'paths_by_machine' not in config:
             config['paths_by_machine'] = {}
@@ -1561,7 +1650,7 @@ Tips:
             'cert_path': self.query_one('#path-cert', PathInput).value,
         }
 
-        # Preserve other sections from original config
+        # preserve other sections from original config
         for key in ['paths_database', 'bands', 'plotting']:
             if key in self._config_data and key not in config:
                 config[key] = self._config_data[key]
@@ -1579,13 +1668,11 @@ Tips:
         """Validate the current configuration and return list of errors."""
         errors: list[str] = []
 
-        # Check all Select widgets for missing selections
+        # check all Select widgets for missing selections
         selects = {
             '#machine-select': 'Machine',
             '#logging-level': 'Log Level',
-            '#plot-mode': 'Display Mode',
             '#plot-save-format': 'Save Format',
-            '#rgb-scaling-type': 'Scaling Type',
             '#input-source-select': 'Input Source',
             '#band-constraint': 'Band Constraint',
             '#plot-catalog-name': 'Catalog Name',
@@ -1599,12 +1686,12 @@ Tips:
             except Exception:
                 pass
 
-        # Validate bands
+        # validate bands
         band_selector = self.query_one('#band-selector', BandSelector)
         if not band_selector.is_valid():
             errors.append('At least one band must be selected')
 
-        # Validate numeric fields
+        # validate numeric fields
         numeric_validations = [
             ('#n-download-threads', 'Download threads', 1, 32),
             ('#n-cutout-processes', 'Cutout processes', 1, 32),
@@ -1620,19 +1707,36 @@ Tips:
             except ValueError:
                 errors.append(f'{name} must be a number')
 
-        # Validate plotting bands (should be exactly 3 in correct order)
-        rgb_selector = self.query_one('#rgb-band-selector', RGBBandSelector)
-        selected_rgb = rgb_selector.get_selected_bands()
-        if selected_rgb and len(selected_rgb) != 3:
-            # Partial selection is invalid - must be all 3 or none
-            errors.append('RGB bands must be either all 3 selected or empty (to use runtime bands)')
+        # plotting validation
+        # only validate if plotting is enabled
+        plotting_enabled = self.query_one('#plot-enable-switch', Switch).value
+        if plotting_enabled:
+            # check if we are in RGB or Mono mode
+            is_rgb = self.query_one('#plot-mode-switch', Switch).value
 
-        # Validate paths
+            if is_rgb:
+                # validate RGB Bands
+                rgb_selector = self.query_one('#rgb-band-selector', RGBBandSelector)
+                selected_rgb = rgb_selector.get_selected_bands()
+                if selected_rgb and len(selected_rgb) != 3:
+                    errors.append('RGB bands must be either all 3 selected or empty')
+
+                # validate RGB-specific dropdowns
+                if self.query_one('#plot-mode', Select).value == Select.BLANK:
+                    errors.append('Display Mode must be selected')
+                if self.query_one('#rgb-scaling-type', Select).value == Select.BLANK:
+                    errors.append('Scaling Type must be selected')
+            else:
+                # validate Mono Band
+                if self.query_one('#plot-mono-band', Select).value == Select.BLANK:
+                    errors.append('Monochromatic Band must be selected')
+
+        # validate paths
         cert_path = self.query_one('#path-cert', PathInput)
         if not cert_path.is_valid():
             errors.append('Certificate path is invalid or file does not exist')
 
-        # Validate input source specifics
+        # validate input source specifics
         source = str(self.query_one('#input-source-select', Select).value)
         if source == 'dataframe':
             df_path = self.query_one('#dataframe-path', PathInput)
@@ -1644,7 +1748,7 @@ Tips:
         if errors:
             return errors
 
-        # Try Pydantic validation
+        # try pydantic validation
         try:
             config_dict = self._collect_all_values()
             RawConfig.model_validate(config_dict)

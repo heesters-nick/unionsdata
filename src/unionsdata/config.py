@@ -35,7 +35,7 @@ class RuntimeCfg(BaseModel):
     model_config = ConfigDict(extra='forbid')
     n_download_threads: int = Field(ge=1, le=32)
     n_cutout_processes: int = Field(ge=1, le=32)
-    bands: list[str] = Field(..., min_length=1, max_length=7)
+    bands: list[str] | None = None
     resume: bool = False
     max_retries: int = Field(ge=1, le=10, default=3)
 
@@ -75,8 +75,9 @@ class PlottingCfg(BaseModel):
     """Plotting configuration."""
 
     model_config = ConfigDict(extra='forbid')
+    enable: bool = False
     catalog_name: str = 'auto'
-    bands: list[str] | None = None  # None = use first 3 from runtime.bands
+    bands: list[str] | None = None
     size_pix: int = Field(ge=1)
     mode: Literal['grid', 'channel'] = 'grid'
     max_cols: int = Field(ge=1, default=5)
@@ -219,9 +220,18 @@ class Settings(BaseModel):
     def _validate(self) -> Settings:
         """Validate cross-field dependencies."""
         # Validate that all bands in runtime.bands exist in bands dict
+        if self.runtime.bands is None or len(self.runtime.bands) == 0:
+            raise ValueError('runtime.bands must be set to a list of band names')
         for band in self.runtime.bands:
             if band not in self.bands:
                 raise ValueError(f'Unknown band in runtime.bands: {band}')
+        # validate that plotting.bands is not None if plotting.enable is True
+        if self.plotting.enable:
+            if self.plotting.bands is None or len(self.plotting.bands) == 0:
+                raise ValueError('plotting.bands must be set when plotting.enable is True')
+            for band in self.plotting.bands:
+                if band not in self.bands:
+                    raise ValueError(f'Unknown band in plotting.bands: {band}')
 
         # Validate band_constraint is reasonable
         if self.tiles.band_constraint > len(self.bands):

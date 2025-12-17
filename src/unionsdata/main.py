@@ -31,7 +31,6 @@ from unionsdata.plotting import (
     find_most_recent_catalog,
     load_cutouts,
     plot_cutouts,
-    resolve_plot_bands,
 )
 from unionsdata.tui import run_config_editor
 from unionsdata.utils import (
@@ -113,6 +112,11 @@ def run_download(args: argparse.Namespace) -> None:
     # Get rid of any previous log files if resume = False
     purge_previous_run(cfg)
 
+    # Define frequently used variables
+    bands = cfg.runtime.bands or []
+    tile_info_dir = cfg.paths.tile_info_directory
+    download_dir = cfg.paths.root_dir_data
+
     setup_logger(
         log_dir=cfg.paths.log_directory,
         name=cfg.logging.name,
@@ -135,15 +139,10 @@ def run_download(args: argparse.Namespace) -> None:
 
     # filter considered bands from the full band dictionary
     selected_band_dict: dict[str, BandDict] = {
-        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in cfg.runtime.bands
+        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in bands
     }
     # make sure necessary directories exist
     ensure_runtime_dirs(cfg=cfg)
-
-    # Define frequently used variables
-    bands = cfg.runtime.bands
-    tile_info_dir = cfg.paths.tile_info_directory
-    download_dir = cfg.paths.root_dir_data
 
     # Query availability of tiles
     logger.debug('Querying tile availability...')
@@ -157,9 +156,7 @@ def run_download(args: argparse.Namespace) -> None:
     all_unique_tiles = availability_all.unique_tiles
 
     # Filter tiles to only those in selected bands
-    selected_tiles = [
-        all_tiles[list(all_band_dict.keys()).index(band)] for band in cfg.runtime.bands
-    ]
+    selected_tiles = [all_tiles[list(all_band_dict.keys()).index(band)] for band in bands]
 
     availability = TileAvailability(selected_tiles, selected_band_dict)
 
@@ -430,9 +427,7 @@ def run_plot(args: argparse.Namespace) -> None:
     data_dir = cfg.paths.root_dir_data
     cutout_size = cfg.plotting.size_pix
     catalog_name = cfg.plotting.catalog_name
-
-    # Resolve plotting bands - default to first 3 runtime bands
-    plot_bands = resolve_plot_bands(cfg)
+    plot_bands = cfg.plotting.bands or []
 
     # filter considered bands from the full band dictionary
     selected_band_dict: dict[str, BandDict] = {
