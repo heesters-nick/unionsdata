@@ -94,6 +94,7 @@ class PathInput(Static):
         self._is_certificate = is_certificate
         self._action_button = action_button
         self._pulsing = False
+        self._mounted = False
         self._validator: Validator | None = None
 
         if is_certificate:
@@ -121,8 +122,14 @@ class PathInput(Static):
             yield self._action_button
 
     def on_mount(self) -> None:
+        self._mounted = True
         self.value = self._initial_value
         self.query_one(Input).validate(self.value)
+
+    def on_unmount(self) -> None:
+        """Clean up animations when widget is removed."""
+        self._mounted = False
+        self._stop_pulse()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if 'path-input' in event.input.classes:
@@ -133,7 +140,7 @@ class PathInput(Static):
     def _start_pulse(self, color_name: str) -> None:
         """Start a pulsing tint animation on the action button."""
         btn = self._action_button
-        if not btn:
+        if not btn or not self._mounted:
             return
 
         self._pulsing = True
@@ -153,24 +160,38 @@ class PathInput(Static):
         tint_high = base_color.with_alpha(0.5)
 
         def animate_up() -> None:
-            if not self._pulsing:
-                btn.styles.tint = None
+            if not self._pulsing or not self._mounted:
+                if btn:
+                    btn.styles.tint = None
                 return
-            btn.styles.animate(
-                'tint',
-                value=tint_high,
-                duration=1.0,
-                easing='in_out_cubic',
-                on_complete=animate_down,
-            )
+            try:
+                btn.styles.animate(
+                    'tint',
+                    value=tint_high,
+                    duration=1.0,
+                    easing='in_out_cubic',
+                    on_complete=animate_down,
+                )
+            except Exception:
+                # Widget may have been removed
+                self._pulsing = False
 
         def animate_down() -> None:
-            if not self._pulsing:
-                btn.styles.tint = None
+            if not self._pulsing or not self._mounted:
+                if btn:
+                    btn.styles.tint = None
                 return
-            btn.styles.animate(
-                'tint', value=tint_low, duration=1.0, easing='in_out_cubic', on_complete=animate_up
-            )
+            try:
+                btn.styles.animate(
+                    'tint',
+                    value=tint_low,
+                    duration=1.0,
+                    easing='in_out_cubic',
+                    on_complete=animate_up,
+                )
+            except Exception:
+                # Widget may have been removed
+                self._pulsing = False
 
         # Start animation sequence
         btn.styles.tint = tint_low
@@ -186,7 +207,10 @@ class PathInput(Static):
         btn = self._action_button
 
         # stop pulsing
-        btn.styles.tint = None
+        try:
+            btn.styles.tint = None
+        except Exception:
+            pass  # Widget may already be gone
 
         def ensure_reset() -> None:
             if not self._pulsing:
