@@ -216,7 +216,7 @@ def tile_finder(
     n_bands = np.empty(len(catalog), dtype=np.int32)
     for i, obj_coord in enumerate(coord_c):
         assert obj_coord is not None
-        tile_numbers, _ = query_tree(
+        tile_numbers = query_tree(
             all_unique_tiles,
             np.array([obj_coord.ra.deg, obj_coord.dec.deg]),
             tile_info_dir,

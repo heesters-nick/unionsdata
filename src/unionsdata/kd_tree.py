@@ -39,7 +39,7 @@ def build_tree(tiles: list[tuple[int, int]], tile_info_dir: Path, save: bool = T
 
 def query_tree(
     tiles: list[tuple[int, int]], coords: NDArray[np.float64], tile_info_dir: Path
-) -> tuple[tuple[int, int], float]:
+) -> tuple[int, int]:
     """
     Query the kd tree to find what tile an object is in.
 
@@ -57,8 +57,8 @@ def query_tree(
         loaded_tree = pickle.load(f)
     logger.debug(f'Loaded kd tree from {tree_path}')
     try:
-        tile_name, dist = find_tile(loaded_tree, tiles, coords)
-        return tile_name, dist
+        tile_name, _ = find_tile(loaded_tree, tiles, coords)
+        return tile_name
     except ValueError as e:
         raise e
 
@@ -152,13 +152,13 @@ def relate_coord_tile(
         ra, dec = coords
         xxx = ra * 2 * np.cos(np.radians(dec))
         yyy = (dec + 90) * 2
-        return np.round(xxx), np.round(yyy)
+        return int(np.round(xxx)), int(np.round(yyy))
     elif nums:
         if not isinstance(nums, tuple) or len(nums) != 2:
             raise TypeError('nums must be a tuple of (first_tile_num, second_tile_num)')
         xxx, yyy = nums
         dec = yyy / 2 - 90
         ra = xxx / 2 / np.cos(np.radians(dec))
-        return np.round(ra, 12), np.round(dec, 12)
+        return float(np.round(ra, 12)), float(np.round(dec, 12))
     else:
         raise ValueError('Either coords or nums must be provided.')

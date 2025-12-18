@@ -35,6 +35,7 @@ from unionsdata.verification import get_file_size, is_fits_valid, verify_downloa
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
+_SHUTDOWN_SENTINEL = object()
 
 
 # ========== Progress Tracking ==========
@@ -54,55 +55,58 @@ class DownloadJob:
 
 @dataclass
 class ProgressTracker:
-    """Thread-safe tracker for download progress."""
+    """Thread-safe tracker for download progress with cached totals."""
 
     jobs: list[DownloadJob] = field(default_factory=list)
     _lock: Lock = field(default_factory=Lock)
+    _completed_bytes: int = field(default=0)  # Cache completed bytes
+    _expected_total: int = field(default=0)  # Cache expected total
 
     def add_job(self, job: DownloadJob) -> None:
         with self._lock:
             self.jobs.append(job)
+            self._expected_total += job.expected_size
 
     def mark_completed(self, final_path: Path) -> None:
         with self._lock:
             for job in self.jobs:
-                if job.final_path == final_path:
+                if job.final_path == final_path and not job.completed:
                     job.completed = True
+                    self._completed_bytes += job.expected_size
                     break
 
     def get_totals(self) -> tuple[int, int]:
-        """Get (current_bytes, expected_bytes) in a single pass."""
+        """Get (current_bytes, expected_bytes) efficiently."""
         with self._lock:
-            expected_total = 0
-            current_total = 0
+            if self._expected_total == 0:
+                return 0, 0
 
+            # Start with known completed bytes
+            current_total = self._completed_bytes
+
+            # Only check in-progress files (not completed ones)
             for job in self.jobs:
-                if job.expected_size == 0:
+                if job.completed or job.expected_size == 0:
                     continue
 
-                expected_total += job.expected_size
-
-                if job.completed:
-                    current_total += job.expected_size
-                elif job.final_path.exists():
-                    try:
+                # Check actual file progress
+                try:
+                    if job.final_path.exists():
                         current_total += job.final_path.stat().st_size
-                    except OSError:
-                        pass
-                elif job.temp_path.exists():
-                    try:
+                    elif job.temp_path.exists():
                         current_total += job.temp_path.stat().st_size
-                    except OSError:
-                        pass
-                else:
-                    # Check for .part files from vcp
-                    for pf in job.temp_path.parent.glob(f'{job.temp_path.name}*.part'):
-                        try:
-                            current_total += pf.stat().st_size
-                        except OSError:
-                            pass
+                    else:
+                        # Check for .part files from vcp
+                        for pf in job.temp_path.parent.glob(f'{job.temp_path.name}*.part'):
+                            try:
+                                current_total += pf.stat().st_size
+                                break  # Only count one part file
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
 
-            return current_total, expected_total
+            return current_total, self._expected_total
 
 
 def fetch_expected_sizes(
@@ -157,19 +161,18 @@ def fetch_expected_sizes(
 def progress_monitor(
     tracker: ProgressTracker,
     shutdown_flag: Event,
-    update_interval: float = 0.1,
+    update_interval: float = 0.5,
 ) -> None:
     """Monitor thread that updates progress bar based on file sizes."""
     # Wait briefly for jobs to be populated
     time.sleep(1.0)
 
-    current_start, total_bytes = tracker.get_totals()
+    _, total_bytes = tracker.get_totals()
 
-    # Already completed or no progress to show
-    if total_bytes == 0 or total_bytes >= current_start:
+    if total_bytes == 0:
+        logger.debug('No downloads to track in progress monitor.')
         return
 
-    # Create the Rich Progress Bar
     with Progress(
         SpinnerColumn(),
         TextColumn('[bold blue]{task.description}'),
@@ -183,14 +186,15 @@ def progress_monitor(
         TimeRemainingColumn(),
         transient=False,
     ) as progress:
-        # Add task
         task_id = progress.add_task('Downloading', total=total_bytes)
 
         while not shutdown_flag.is_set():
             current_bytes, _ = tracker.get_totals()
-
-            # Update with absolute value (no delta needed)
             progress.update(task_id, completed=current_bytes)
+
+            # Check if complete
+            if current_bytes >= total_bytes:
+                break
 
             time.sleep(update_interval)
 
@@ -525,12 +529,16 @@ def download_worker(
     while not shutdown_flag.is_set():
         try:
             # Get next download job
-            tile, band = download_queue.get(timeout=QUEUE_TIMEOUT)
+            job = download_queue.get(timeout=QUEUE_TIMEOUT)
 
-            # Check for sentinel value (shutdown signal)
-            if tile is None:
+            # Check for sentinel
+            if job is _SHUTDOWN_SENTINEL:
                 logger.debug(f'Download worker {worker_id} received shutdown signal')
+                download_queue.task_done()
                 break
+
+            # Now we know it's a valid job
+            tile, band = job
 
             try:
                 # Get file paths and specifications
@@ -610,36 +618,31 @@ def download_worker(
                             # Check and claim under lock
                             with cutout_futures_lock:
                                 if tile_str_key in tiles_claimed_for_cutout:
-                                    should_submit = False
+                                    pass  # already claimed
                                 else:
-                                    tiles_claimed_for_cutout.add(tile_str_key)
-                                    should_submit = True
+                                    try:
+                                        future = cutout_executor.submit(
+                                            create_cutouts_for_tile,
+                                            tile=tile,
+                                            tile_dir=paths['tile_dir'],
+                                            bands=bands_sorted_by_wavelength,
+                                            catalog=tile_catalog,
+                                            all_band_dictionary=all_band_dictionary,
+                                            output_dir=cutout_save_dir,
+                                            cutout_size=cutouts.size_pix,
+                                        )
 
-                            if should_submit:
-                                try:
-                                    future = cutout_executor.submit(
-                                        create_cutouts_for_tile,
-                                        tile=tile,
-                                        tile_dir=paths['tile_dir'],
-                                        bands=bands_sorted_by_wavelength,
-                                        catalog=tile_catalog,
-                                        all_band_dictionary=all_band_dictionary,
-                                        output_dir=cutout_save_dir,
-                                        cutout_size=cutouts.size_pix,
-                                    )
-                                    with cutout_futures_lock:
+                                        tiles_claimed_for_cutout.add(tile_str_key)
                                         cutout_futures[tile_str_key] = future
 
-                                    logger.debug(
-                                        f'Submitted tile {tile_str_key} for cutout creation '
-                                        f'({len(tile_catalog)} objects)'
-                                    )
-                                except Exception as e:
-                                    with cutout_futures_lock:
-                                        tiles_claimed_for_cutout.discard(tile_str_key)
-                                    logger.error(
-                                        f'Failed to submit cutout job for {tile_str_key}: {e}'
-                                    )
+                                        logger.debug(
+                                            f'Submitted tile {tile_str_key} for cutout creation '
+                                            f'({len(tile_catalog)} objects)'
+                                        )
+                                    except Exception as e:
+                                        logger.error(
+                                            f'Failed to submit cutout job for {tile_str_key}: {e}'
+                                        )
 
                     else:
                         logger.debug(
@@ -709,7 +712,7 @@ def download_tiles(
     """
 
     # Create queue and threading objects
-    download_queue: Queue[tuple[tuple[int, int] | None, str | None]] = Queue()
+    download_queue: Queue[tuple[tuple[int, int], str] | object] = Queue()
     download_stats = {'downloaded': 0, 'skipped': 0, 'failed': 0}
     stats_lock = threading.Lock()
     shutdown_flag = Event()
@@ -877,7 +880,7 @@ def download_tiles(
 
         # Send sentinel values to wake up workers
         for _ in range(num_threads):
-            download_queue.put((None, None))
+            download_queue.put(_SHUTDOWN_SENTINEL)
 
         # Wait for all threads to finish
         logger.debug('Waiting for worker threads to finish...')
@@ -1096,15 +1099,36 @@ def fetch_fits_header(
     """
     header_url = url + '?META=true'
 
+    last_exception: Exception | None = None
+
     for attempt in range(retries + 1):
         try:
             response = session.get(header_url, timeout=timeout)
             response.raise_for_status()
             return response.text
+        except requests.Timeout as e:
+            last_exception = e
+            logger.warning(f'Timeout on attempt {attempt + 1}/{retries + 1} for {url}')
+        except requests.ConnectionError as e:
+            last_exception = e
+            logger.warning(f'Connection error on attempt {attempt + 1}/{retries + 1} for {url}')
+        except requests.HTTPError as e:
+            last_exception = e
+            logger.warning(
+                f'HTTP error {e.response.status_code} on attempt {attempt + 1}/{retries + 1} for {url}'
+            )
+            # Don't retry on 4xx client errors (except 429 rate limit)
+            if e.response.status_code < 500 and e.response.status_code != 429:
+                break
         except requests.RequestException as e:
-            logger.warning(f'Attempt {attempt + 1}/{retries + 1} failed for {url}: {e}')
-            if attempt < retries:
-                time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s
+            last_exception = e
+            logger.warning(f'Request error on attempt {attempt + 1}/{retries + 1} for {url}: {e}')
+
+        if attempt < retries:
+            sleep_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
+            time.sleep(sleep_time)
 
     logger.error(f'Failed to fetch header after {retries + 1} attempts: {url}')
+    if last_exception:
+        logger.debug(f'Last exception: {last_exception}')
     return None

@@ -242,10 +242,9 @@ def test_query_tree_success(tmp_path: Path, mocker):
     # Mock find_tile to return predictable result
     mocker.patch('unionsdata.kd_tree.find_tile', return_value=((217, 292), 0.5))
 
-    result_tile, distance = query_tree(tiles, coords, tile_info_dir)
+    result_tile = query_tree(tiles, coords, tile_info_dir)
 
     assert result_tile == (217, 292)
-    assert distance == 0.5
 
 
 def test_query_tree_propagates_value_error(tmp_path: Path, mocker):
