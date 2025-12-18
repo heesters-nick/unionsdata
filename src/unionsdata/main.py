@@ -38,6 +38,7 @@ from unionsdata.utils import (
     input_to_tile_list,
     query_availability,
 )
+from unionsdata.yaml_utils import yaml_to_string
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def run_download(args: argparse.Namespace) -> None:
     cfg_dict = settings_to_dict(cfg)
 
     # Print settings in human readable format
-    cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
+    cfg_yaml = yaml_to_string(cfg_dict)
     logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
     all_band_dict: dict[str, BandDict] = {

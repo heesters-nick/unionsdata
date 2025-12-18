@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import pexpect
-import yaml
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -40,6 +39,7 @@ from unionsdata.tui.widgets import (
     TileList,
 )
 from unionsdata.tui.widgets.rgb_selector import BANDS
+from unionsdata.yaml_utils import load_yaml, parse_yaml, save_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -445,8 +445,7 @@ class ConfigEditorApp(App[None]):
         # Try to load existing config
         if self._config_path.exists():
             try:
-                with open(self._config_path, encoding='utf-8') as f:
-                    self._config_data = yaml.safe_load(f) or {}
+                self._config_data = load_yaml(self._config_path)
                 logger.debug(f'Loaded config from {self._config_path}')
             except Exception as e:
                 logger.warning(f'Failed to load config: {e}, using defaults')
@@ -456,7 +455,7 @@ class ConfigEditorApp(App[None]):
             try:
                 template_path = files('unionsdata').joinpath('config.yaml')
                 template_content = template_path.read_text(encoding='utf-8')
-                self._config_data = yaml.safe_load(template_content) or {}
+                self._config_data = parse_yaml(template_content)
                 logger.debug('Loaded default config template')
             except Exception as e:
                 logger.warning(f'Failed to load template: {e}')
@@ -1305,10 +1304,7 @@ class ConfigEditorApp(App[None]):
         try:
             # Ensure directory exists
             if self._config_path:
-                self._config_path.parent.mkdir(parents=True, exist_ok=True)
-
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    yaml.safe_dump(config_dict, f, sort_keys=False, default_flow_style=False)
+                save_yaml(self._config_path, config_dict)
 
                 self.notify(
                     f'Saved to {self._config_path}', title='Success', severity='information'

@@ -10,10 +10,11 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-import yaml
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from unionsdata.yaml_utils import load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -297,8 +298,7 @@ def load_settings(
     config_path = get_config_path(is_editable, config_path)
     logger.info(f'Loading configuration from: {config_path}')
 
-    with open(config_path, encoding='utf-8') as f:
-        yaml_data = yaml.safe_load(f)
+    yaml_data = load_yaml(config_path)
 
     # Apply CLI overrides to raw YAML data before validation
     if cli_overrides:
