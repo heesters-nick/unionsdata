@@ -27,8 +27,7 @@ tiles:
   require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
 cutouts:
-  enable: true                                                     # create cutouts
-  cutouts_only: false                                              # if true, only download cutouts, not full tiles
+  mode: "after_download"                                          # disabled | after_download | direct_only
   size_pix: 512                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 

@@ -242,7 +242,7 @@ def run_download(args: argparse.Namespace) -> None:
 
     if (
         not catalog.empty
-        and cfg.cutouts.enable
+        and cfg.cutouts.mode != 'disabled'
         and cfg.inputs.source in ['coordinates', 'dataframe']
     ):
         successful_tiles = set(tile_cutout_info.keys())

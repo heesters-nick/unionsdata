@@ -55,8 +55,7 @@ class CutoutsCfg(BaseModel):
     """Cutouts configuration."""
 
     model_config = ConfigDict(extra='forbid')
-    enable: bool = True
-    cutouts_only: bool = False
+    mode: Literal['disabled', 'after_download', 'direct_only'] = 'after_download'
     size_pix: int = Field(ge=1)
     output_subdir: str
 
@@ -254,7 +253,10 @@ class Settings(BaseModel):
             if not self.inputs.coordinates:
                 logger.warning('inputs.source is "coordinates" but no coordinates specified')
 
-        if self.inputs.source not in ['coordinates', 'dataframe'] and self.cutouts.enable:
+        if (
+            self.inputs.source not in ['coordinates', 'dataframe']
+            and self.cutouts.mode != 'disabled'
+        ):
             logger.warning(
                 'Cutout creation is enabled but no object coordinates were supplied. No cutouts will be created.'
             )
@@ -418,8 +420,8 @@ def _apply_cli_overrides(yaml_data: dict[str, Any], overrides: dict[str, Any]) -
         logger.debug('CLI override: inputs.source = all_available')
 
     if 'cutouts' in overrides and overrides['cutouts'] is not None:
-        yaml_data['cutouts']['enable'] = overrides['cutouts']
-        logger.debug(f'CLI override: cutouts.enable = {overrides["cutouts"]}')
+        yaml_data['cutouts']['mode'] = 'after_download' if overrides['cutouts'] else 'disabled'
+        logger.debug(f'CLI override: cutouts.mode = {yaml_data["cutouts"]["mode"]}')
 
     return yaml_data
 

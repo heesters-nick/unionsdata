@@ -730,7 +730,7 @@ def download_tiles(
     cutout_futures: dict[str, Future[tuple[int, int, int]]] = {}  # Track futures by tile_key
     cutout_futures_lock = threading.Lock()
 
-    if cutouts.enable:
+    if cutouts.mode != 'disabled':
         # Use spawn method to avoid fork() warning with threads
         mp_context = multiprocessing.get_context('spawn')
         cutout_executor = ProcessPoolExecutor(

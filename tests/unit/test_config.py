@@ -39,8 +39,7 @@ tiles:
   require_all_specified_bands: false
 
 cutouts:
-    enable: true
-    cutouts_only: false
+    mode: "after_download"
     size_pix: 256
     output_subdir: "cutouts"
 

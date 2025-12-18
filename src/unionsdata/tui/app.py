@@ -504,8 +504,7 @@ class ConfigEditorApp(App[None]):
                 'require_all_specified_bands': False,
             },
             'cutouts': {
-                'enable': True,
-                'cutouts_only': False,
+                'mode': 'after_download',
                 'size_pix': 512,
                 'output_subdir': 'cutouts',
             },
@@ -759,51 +758,61 @@ class ConfigEditorApp(App[None]):
         with ScrollableContainer():
             yield Static('Cutout Configuration', classes='section-title')
 
-            # Enable cutouts
-            with Horizontal(classes='field-row'):
-                yield Label('Enable Cutouts:', classes='field-label')
-                yield BetterCheckbox(
-                    'Create cutouts after tile download',
-                    cutouts.get('enable', True),
-                    id='cutouts-enable-checkbox',
-                    classes='field-checkbox',
-                )
+            # Cutout mode
+            cutout_modes: list[tuple[str, str]] = [
+                ('Disabled', 'disabled'),
+                ('After Download', 'after_download'),
+                ('Direct Only', 'direct_only'),
+            ]
+            current_mode = cutouts.get('mode', 'after_download')
 
-            # Cutouts only
-            with Horizontal(classes='field-row'):
-                yield Label('Cutouts Only:', classes='field-label')
-                yield BetterCheckbox(
-                    'Skip full tile download, only create cutouts',
-                    cutouts.get('cutouts_only', False),
-                    id='cutouts-only-checkbox',
-                    classes='field-checkbox',
-                )
-
-            # Cutout size
             with Horizontal(classes='field-row'):
                 with Horizontal(classes='field-label'):
-                    yield Label('Size (pixels)')
-                    yield InfoIcon('Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)')
+                    yield Label('Cutout Mode')
+                    yield InfoIcon(
+                        'Disabled: No cutouts created. '
+                        'After Download: Download full tiles, then extract cutouts. '
+                        'Direct Only: Fetch cutouts directly without storing full tiles.'
+                    )
                     yield Label(':')
-                yield Input(
-                    value=str(cutouts.get('size_pix', 512)),
-                    id='cutout-size',
+                yield Select(
+                    cutout_modes,
+                    value=current_mode,
+                    id='cutout-mode-select',
                     classes='field-input',
-                    validators=[IntegerRange(1, 10000)],
                 )
 
-            # Output subdirectory
-            with Horizontal(classes='field-row'):
-                with Horizontal(classes='field-label'):
-                    yield Label('Output Subdir')
-                    yield InfoIcon('Subdirectory for cutout output files')
-                    yield Label(':')
-                yield Input(
-                    value=cutouts.get('output_subdir', 'cutouts'),
-                    id='cutout-subdir',
-                    classes='field-input',
-                    validators=[NonEmptyValidator()],
-                )
+            with Vertical(
+                id='cutout-options-container',
+                classes='' if current_mode != 'disabled' else 'hidden',
+            ):
+                # Cutout size
+                with Horizontal(classes='field-row'):
+                    with Horizontal(classes='field-label'):
+                        yield Label('Size (pixels)')
+                        yield InfoIcon(
+                            'Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)'
+                        )
+                        yield Label(':')
+                    yield Input(
+                        value=str(cutouts.get('size_pix', 512)),
+                        id='cutout-size',
+                        classes='field-input',
+                        validators=[IntegerRange(1, 10000)],
+                    )
+
+                # Output subdirectory
+                with Horizontal(classes='field-row'):
+                    with Horizontal(classes='field-label'):
+                        yield Label('Output Subdir')
+                        yield InfoIcon('Subdirectory for cutout output files')
+                        yield Label(':')
+                    yield Input(
+                        value=cutouts.get('output_subdir', 'cutouts'),
+                        id='cutout-subdir',
+                        classes='field-input',
+                        validators=[NonEmptyValidator()],
+                    )
 
     def _compose_plotting_tab(self) -> ComposeResult:
         """Compose the Plotting settings tab."""
@@ -1217,7 +1226,16 @@ class ConfigEditorApp(App[None]):
         # Handle input source change
         if event.select.id == 'input-source-select':
             self._update_input_source_visibility(str(event.value))
-
+        # Handle cutout mode change
+        elif event.select.id == 'cutout-mode-select':
+            try:
+                container = self.query_one('#cutout-options-container')
+                if event.value == 'disabled':
+                    container.add_class('hidden')
+                else:
+                    container.remove_class('hidden')
+            except Exception:
+                pass
         # Handle machine change
         elif event.select.id == 'machine-select':
             if event.value == 'create_new':
@@ -1595,8 +1613,7 @@ Tips:
 
         # cutouts
         config['cutouts'] = {
-            'enable': self.query_one('#cutouts-enable-checkbox', BetterCheckbox).value,
-            'cutouts_only': self.query_one('#cutouts-only-checkbox', BetterCheckbox).value,
+            'mode': str(self.query_one('#cutout-mode-select', Select).value),
             'size_pix': int(self._get_input_value('#cutout-size', '512')),
             'output_subdir': self._get_input_value('#cutout-subdir', 'cutouts'),
         }
@@ -1694,6 +1711,7 @@ Tips:
             '#plot-save-format': 'Save Format',
             '#input-source-select': 'Input Source',
             '#band-constraint': 'Band Constraint',
+            '#cutout-mode-select': 'Cutout Mode',
         }
 
         for selector, name in selects.items():
