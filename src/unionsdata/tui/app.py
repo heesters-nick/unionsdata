@@ -49,6 +49,30 @@ InputSource = Literal['all_available', 'tiles', 'coordinates', 'dataframe']
 ButtonVariant = Literal['default', 'primary', 'success', 'warning', 'error']
 
 
+def get_select_value(select: Select[str], default: str = '') -> str:
+    """
+    Safely get string value from Select widget.
+
+    Handles Select.BLANK and None cases consistently.
+
+    Args:
+        select: The Select widget
+        default: Default value if nothing selected
+
+    Returns:
+        The selected value as string, or default if nothing selected
+    """
+    value = select.value
+    if value is None or value == Select.BLANK:
+        return default
+    return str(value)
+
+
+def is_select_empty(select: Select[str]) -> bool:
+    """Check if a Select widget has no selection."""
+    return select.value is None or select.value == Select.BLANK
+
+
 class ConfirmDialog(ModalScreen[bool]):
     """A confirmation dialog that returns True/False."""
 
@@ -1539,10 +1563,9 @@ Tips:
         config = dict(self._config_data)
 
         # general
-        try:
-            config['machine'] = str(self.query_one('#machine-select', Select).value)
-        except Exception:
-            config['machine'] = 'local'
+        config['machine'] = get_select_value(
+            self.query_one('#machine-select', Select), default='local'
+        )
 
         config['logging'] = {
             'name': self._get_input_value('#logging-name', 'unionsdata'),
@@ -1671,13 +1694,12 @@ Tips:
             '#plot-save-format': 'Save Format',
             '#input-source-select': 'Input Source',
             '#band-constraint': 'Band Constraint',
-            '#plot-catalog-name': 'Catalog Name',
         }
 
         for selector, name in selects.items():
             try:
-                val = self.query_one(selector, Select).value
-                if val == Select.BLANK:
+                select = self.query_one(selector, Select)
+                if is_select_empty(select):
                     errors.append(f'{name} must be selected')
             except Exception:
                 pass
@@ -1707,25 +1729,47 @@ Tips:
         # only validate if plotting is enabled
         plotting_enabled = self.query_one('#plot-enable-switch', Switch).value
         if plotting_enabled:
+            plot_required_selects = {
+                '#plot-catalog-name': 'Catalog Name',
+                '#plot-save-format': 'Save Format',
+            }
+
+            for selector, name in plot_required_selects.items():
+                try:
+                    select = self.query_one(selector, Select)
+                    if is_select_empty(select):
+                        errors.append(f'{name} must be selected')
+                except Exception:
+                    pass
             # check if we are in RGB or Mono mode
             is_rgb = self.query_one('#plot-mode-switch', Switch).value
 
             if is_rgb:
-                # validate RGB Bands
+                # Validate RGB-specific fields
+                rgb_selects = {
+                    '#plot-mode': 'Display Mode',
+                    '#rgb-scaling-type': 'Scaling Type',
+                }
+                for selector, name in rgb_selects.items():
+                    try:
+                        select = self.query_one(selector, Select)
+                        if is_select_empty(select):
+                            errors.append(f'{name} must be selected')
+                    except Exception:
+                        pass
+
+                # Validate RGB bands
                 rgb_selector = self.query_one('#rgb-band-selector', RGBBandSelector)
                 selected_rgb = rgb_selector.get_selected_bands()
-                if selected_rgb and len(selected_rgb) != 3:
-                    errors.append('RGB bands must be either all 3 selected or empty')
-
-                # validate RGB-specific dropdowns
-                if self.query_one('#plot-mode', Select).value == Select.BLANK:
-                    errors.append('Display Mode must be selected')
-                if self.query_one('#rgb-scaling-type', Select).value == Select.BLANK:
-                    errors.append('Scaling Type must be selected')
+                if not selected_rgb or len(selected_rgb) != 3:
+                    errors.append('All three RGB bands must be selected')
             else:
-                # validate Mono Band
-                if self.query_one('#plot-mono-band', Select).value == Select.BLANK:
-                    errors.append('Monochromatic Band must be selected')
+                # Validate Mono band
+                try:
+                    if is_select_empty(self.query_one('#plot-mono-band', Select)):
+                        errors.append('Monochromatic Band must be selected')
+                except Exception:
+                    pass
 
         # validate paths
         cert_path = self.query_one('#path-cert', PathInput)
