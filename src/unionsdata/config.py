@@ -12,7 +12,7 @@ from typing import Any, Literal, TypedDict
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from unionsdata.yaml_utils import load_yaml
 
@@ -143,6 +143,14 @@ class PathsByMachineEntry(BaseModel):
     dir_tables: Path
     dir_figures: Path
     cert_path: Path
+
+    @field_validator('root_dir_data', 'dir_tables', 'dir_figures', 'cert_path')
+    @classmethod
+    def validate_non_empty_path(cls, v: Path) -> Path:
+        # Pydantic converts empty strings to Path('.'), so we must check for that
+        if str(v) == '.' or not str(v).strip():
+            raise ValueError('Path cannot be empty')
+        return v
 
 
 class BandCfg(BaseModel):

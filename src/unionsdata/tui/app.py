@@ -28,7 +28,7 @@ from textual.widgets import (
 )
 
 from unionsdata.config import RawConfig, get_user_config_dir
-from unionsdata.tui.validators import IntegerRange, NonEmptyValidator
+from unionsdata.tui.validators import FloatValidator, IntegerRange, NonEmptyValidator
 from unionsdata.tui.widgets import (
     BandSelector,
     BetterCheckbox,
@@ -973,6 +973,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(mono.get('stretch', 125.0)),
                                 id='mono-stretch',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                         # Q
@@ -987,6 +988,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(mono.get('Q', 7.0)),
                                 id='mono-q',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                         # Gamma
@@ -999,6 +1001,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(mono.get('gamma', 0.25)),
                                 id='mono-gamma',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                     # RGB mode (hidden if mono)
@@ -1075,6 +1078,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(rgb.get('stretch', 125.0)),
                                 id='rgb-stretch',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                         # Q
@@ -1089,6 +1093,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(rgb.get('Q', 7.0)),
                                 id='rgb-q',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                         # Gamma
@@ -1101,6 +1106,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(rgb.get('gamma', 0.25)),
                                 id='rgb-gamma',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
                         # Standard ZP
@@ -1113,6 +1119,7 @@ class ConfigEditorApp(App[None]):
                                 value=str(rgb.get('standard_zp', 30.0)),
                                 id='rgb-standard-zp',
                                 classes='field-input',
+                                validators=[FloatValidator()],
                             )
 
     def _compose_inputs_tab(self) -> ComposeResult:
@@ -1824,16 +1831,9 @@ Tips:
             ('#n-download-threads', 'Download threads', 1, 32),
             ('#n-cutout-processes', 'Cutout processes', 1, 32),
             ('#max-retries', 'Max retries', 1, 10),
-            ('#cutout-size', 'Size (pixels)', 1, 10000),
-            ('#plot-size', 'Size (pixels)', 1, 10000),
+            ('#cutout-size', 'Cutout Size', 1, 10000),
+            ('#plot-size', 'Plot Cutout Size', 1, 10000),
             ('#plot-max-cols', 'Max columns', 1, 100000),
-            # ('#mono-scaling-type', 'Scaling Type', 1, 100),
-            # ('#mono-q', 'Q', 1, 100),
-            # ('#mono-gamma', 'Gamma', 1, 100),
-            # ('#rgb-stretch', 'Stretch', 1, 1000),
-            # ('#rgb-q', 'Q', 1, 100),
-            # ('#rgb-gamma', 'Gamma', 1, 100),
-            # ('#rgb-standard-zp', 'Standard ZP', 1, 100),
         ]
 
         for selector, name, min_val, max_val in numeric_validations:
@@ -1843,6 +1843,59 @@ Tips:
                     errors.append(f'{name} must be between {min_val} and {max_val}')
             except ValueError:
                 errors.append(f'{name} must be a number')
+
+        # Validate Plotting Floats (Must be numbers, no range constraints)
+        if self.query_one('#plot-enable-switch', Switch).value:
+            float_fields = [
+                ('#rgb-stretch', 'RGB Stretch'),
+                ('#rgb-q', 'RGB Q'),
+                ('#rgb-gamma', 'RGB Gamma'),
+                ('#rgb-standard-zp', 'RGB Standard ZP'),
+                ('#mono-stretch', 'Mono Stretch'),
+                ('#mono-q', 'Mono Q'),
+                ('#mono-gamma', 'Mono Gamma'),
+            ]
+
+            for selector, name in float_fields:
+                try:
+                    # Check if widget exists (depends on RGB/Mono mode)
+                    if self.query_one(selector, Input).visible:
+                        val_str = self._get_input_value(selector)
+                        float(val_str)
+                except ValueError:
+                    errors.append(f'{name} must be a number')
+                except Exception:
+                    pass  # Widget might not be visible/mounted
+
+        # Validate machine paths (Root, Data, Tables, Figures)
+        machine_paths = {
+            '#path-root-data': 'Data Directory',
+            '#path-tables': 'Tables Directory',
+            '#path-figures': 'Figures Directory',
+            '#path-cert': 'Certificate Path',
+        }
+
+        for selector, name in machine_paths.items():
+            try:
+                # Get the widget
+                widget = self.query_one(selector, PathInput)
+                # Check if the value is empty
+                if not widget.value.strip():
+                    errors.append(f'{name} cannot be empty')
+            except Exception:
+                pass
+
+        # band constraint validation
+        try:
+            constraint = int(str(self.query_one('#band-constraint', Select).value))
+            total_bands = len(self._config_data.get('bands', {}))
+
+            if constraint > total_bands:
+                errors.append(
+                    f'Band constraint ({constraint}) cannot exceed total available bands ({total_bands})'
+                )
+        except Exception:
+            pass
 
         # plotting validation
         # only validate if plotting is enabled
@@ -1900,7 +1953,15 @@ Tips:
             errors.append('Certificate path is invalid or file does not exist')
 
         # validate input source specifics
-        source = str(self.query_one('#input-source-select', Select).value)
+        source = get_select_value(self.query_one('#input-source-select', Select))
+        if source == 'tiles':
+            if not self.query_one('#tiles-list', TileList).get_tiles():
+                errors.append('At least one tile is required when source is "Tiles"')
+        elif source == 'coordinates':
+            if not self.query_one('#coordinates-list', CoordinateList).get_coordinates():
+                errors.append(
+                    'At least one coordinate pair is required when source is "Coordinates"'
+                )
         if source == 'dataframe':
             df_path = self.query_one('#dataframe-path', PathInput)
             if not df_path.value.strip():

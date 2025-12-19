@@ -272,6 +272,7 @@ class CoordinateList(Static):
     def on_mount(self) -> None:
         """Initialize coordinates on mount."""
         self.coordinates = list(self._initial_coords)
+        self._update_validation_ui()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle add button press."""
@@ -281,13 +282,17 @@ class CoordinateList(Static):
     def on_coordinate_row_removed(self, event: CoordinateRow.Removed) -> None:
         """Handle row removal."""
         event.row.remove()
-        self._update_indices()
-        self._collect_values()
+        self._update_indices(exclude=event.row)
+        self._collect_values(exclude=event.row)
 
         # Show empty message if no rows left
         container = self.query_one('#coord-rows-container', Vertical)
-        if not list(container.query(CoordinateRow)):
-            container.mount(Static('No coordinates added', classes='empty-message'))
+        remaining_rows = [r for r in container.query(CoordinateRow) if r is not event.row]
+
+        if not remaining_rows:
+            # Only add empty message if it's not already there
+            if not list(container.query('.empty-message')):
+                container.mount(Static('No coordinates added', classes='empty-message'))
 
     def on_coordinate_row_value_changed(self, event: CoordinateRow.ValueChanged) -> None:
         """Handle value changes in rows."""
@@ -314,20 +319,39 @@ class CoordinateList(Static):
         self._row_counter += 1
         container.mount(new_row)
 
-    def _update_indices(self) -> None:
-        """Update row indices after removal."""
+    def _update_indices(self, exclude: CoordinateRow | None = None) -> None:
+        """Update row indices, ignoring excluded row."""
         container = self.query_one('#coord-rows-container', Vertical)
-        for i, row in enumerate(container.query(CoordinateRow)):
+        current_idx = 0
+        for row in container.query(CoordinateRow):
+            if row is exclude:
+                continue
             index_label = row.query_one('.row-index', Static)
-            index_label.update(f'{i + 1}.')
-            row._index = i
+            index_label.update(f'{current_idx + 1}.')
+            row._index = current_idx
+            current_idx += 1
 
-    def _collect_values(self) -> None:
-        """Collect all coordinate values from rows."""
+    def _update_validation_ui(self) -> None:
+        try:
+            label = self.query_one('.validation-feedback', Label)
+            if not self.coordinates:
+                label.update(
+                    '✗ At least one coordinate pair is required when source is "Coordinates"'
+                )
+            else:
+                label.update('')
+        except Exception:
+            pass
+
+    def _collect_values(self, exclude: CoordinateRow | None = None) -> None:
+        """Collect all coordinate values, ignoring excluded row."""
         container = self.query_one('#coord-rows-container', Vertical)
         new_coords: list[tuple[float, float]] = []
 
         for row in container.query(CoordinateRow):
+            if row is exclude:
+                continue
+
             v1, v2 = row.get_values()
             if v1.strip() and v2.strip():
                 try:
@@ -337,6 +361,7 @@ class CoordinateList(Static):
 
         self.coordinates = new_coords
         self.post_message(self.Changed(self, self.coordinates))
+        self._update_validation_ui()
 
     def get_coordinates(self) -> list[tuple[float, float]]:
         """Get the current list of coordinates."""
@@ -370,9 +395,15 @@ class CoordinateList(Static):
             container.mount(Static('No coordinates added', classes='empty-message'))
 
         self.coordinates = list(coordinates)
+        self._update_validation_ui()
 
     def is_valid(self) -> bool:
-        """Check if all rows have valid values."""
+        """Check if valid (not empty and all rows valid)."""
+        # Fail if empty
+        if not self.coordinates:
+            return False
+
+        # Fail if any individual row is invalid
         container = self.query_one('#coord-rows-container', Vertical)
         for row in container.query(CoordinateRow):
             if not row.is_valid():
@@ -510,13 +541,16 @@ class TileList(Static):
     def on_coordinate_row_removed(self, event: CoordinateRow.Removed) -> None:
         """Handle row removal."""
         event.row.remove()
-        self._update_indices()
-        self._collect_values()
+        self._update_indices(exclude=event.row)
+        self._collect_values(exclude=event.row)
 
         # Show empty message if no rows left
         container = self.query_one('#tile-rows-container', Vertical)
-        if not list(container.query(CoordinateRow)):
-            container.mount(Static('No tiles added', classes='empty-message'))
+        remaining_rows = [r for r in container.query(CoordinateRow) if r is not event.row]
+
+        if not remaining_rows:
+            if not list(container.query('.empty-message')):
+                container.mount(Static('No tiles added', classes='empty-message'))
 
     def on_coordinate_row_value_changed(self, event: CoordinateRow.ValueChanged) -> None:
         """Handle value changes in rows."""
@@ -543,20 +577,27 @@ class TileList(Static):
         self._row_counter += 1
         container.mount(new_row)
 
-    def _update_indices(self) -> None:
-        """Update row indices after removal."""
+    def _update_indices(self, exclude: CoordinateRow | None = None) -> None:
+        """Update row indices, ignoring excluded row."""
         container = self.query_one('#tile-rows-container', Vertical)
-        for i, row in enumerate(container.query(CoordinateRow)):
+        current_idx = 0
+        for row in container.query(CoordinateRow):
+            if row is exclude:
+                continue
             index_label = row.query_one('.row-index', Static)
-            index_label.update(f'{i + 1}.')
-            row._index = i
+            index_label.update(f'{current_idx + 1}.')
+            row._index = current_idx
+            current_idx += 1
 
-    def _collect_values(self) -> None:
-        """Collect all tile values from rows."""
+    def _collect_values(self, exclude: CoordinateRow | None = None) -> None:
+        """Collect values, ignoring excluded row."""
         container = self.query_one('#tile-rows-container', Vertical)
         new_tiles: list[tuple[int, int]] = []
 
         for row in container.query(CoordinateRow):
+            if row is exclude:
+                continue
+
             v1, v2 = row.get_values()
             if v1.strip() and v2.strip():
                 try:
@@ -601,7 +642,12 @@ class TileList(Static):
         self.tiles = list(tiles)
 
     def is_valid(self) -> bool:
-        """Check if all rows have valid values."""
+        """Check if valid (not empty and all rows valid)."""
+        # Fail if empty
+        if not self.tiles:
+            return False
+
+        # Fail if any individual row is invalid
         container = self.query_one('#tile-rows-container', Vertical)
         for row in container.query(CoordinateRow):
             if not row.is_valid():
