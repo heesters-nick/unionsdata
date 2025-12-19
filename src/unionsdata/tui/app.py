@@ -887,19 +887,6 @@ class ConfigEditorApp(App[None]):
                             validators=[IntegerRange(1, 10000)],
                         )
 
-                    # Max columns
-                    with Horizontal(classes='field-row'):
-                        with Horizontal(classes='field-label'):
-                            yield Label('Max Columns')
-                            yield InfoIcon('Maximum columns in grid mode')
-                            yield Label(':')
-                        yield Input(
-                            value=str(plotting.get('max_cols', 5)),
-                            id='plot-max-cols',
-                            classes='field-input',
-                            validators=[IntegerRange(1, 20)],
-                        )
-
                     with Horizontal(classes='field-row'):
                         yield Label('Save Plot:', classes='field-label')
                         yield BetterCheckbox(
@@ -946,6 +933,19 @@ class ConfigEditorApp(App[None]):
                                 value=plot_bands[0] if plot_bands else Select.BLANK,
                                 id='plot-mono-band',
                                 classes='field-input',
+                            )
+
+                        # Max columns in the cutout grid
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Max Columns')
+                                yield InfoIcon('Maximum columns in the cutout grid')
+                                yield Label(':')
+                            yield Input(
+                                value=str(plotting.get('max_cols', 5)),
+                                id='plot-max-cols',
+                                classes='field-input',
+                                validators=[IntegerRange(1, 100)],
                             )
 
                         # Scaling
@@ -1032,6 +1032,23 @@ class ConfigEditorApp(App[None]):
                                 id='plot-mode',
                                 classes='field-input',
                             )
+
+                        with Vertical(
+                            id='rgb-max-columns-container',
+                            classes='' if mode != 'channel' else 'hidden',
+                        ):
+                            # Max columns in the cutout grid
+                            with Horizontal(classes='field-row'):
+                                with Horizontal(classes='field-label'):
+                                    yield Label('Max Columns')
+                                    yield InfoIcon('Maximum columns in the cutout grid')
+                                    yield Label(':')
+                                yield Input(
+                                    value=str(plotting.get('max_cols', 5)),
+                                    id='plot-max-cols',
+                                    classes='field-input',
+                                    validators=[IntegerRange(1, 100)],
+                                )
 
                         # RGB Specific Scaling
                         scaling_type = rgb.get('scaling_type', 'asinh')
@@ -1291,6 +1308,15 @@ class ConfigEditorApp(App[None]):
             try:
                 container = self.query_one('#cutout-options-container')
                 if event.value == 'disabled':
+                    container.add_class('hidden')
+                else:
+                    container.remove_class('hidden')
+            except Exception:
+                pass
+        elif event.select.id == 'plot-mode':
+            try:
+                container = self.query_one('#rgb-max-columns-container')
+                if event.value == 'channel':
                     container.add_class('hidden')
                 else:
                     container.remove_class('hidden')
@@ -1798,7 +1824,16 @@ Tips:
             ('#n-download-threads', 'Download threads', 1, 32),
             ('#n-cutout-processes', 'Cutout processes', 1, 32),
             ('#max-retries', 'Max retries', 1, 10),
-            ('#cutout-size', 'Cutout size', 1, 10000),
+            ('#cutout-size', 'Size (pixels)', 1, 10000),
+            ('#plot-size', 'Size (pixels)', 1, 10000),
+            ('#plot-max-cols', 'Max columns', 1, 100000),
+            # ('#mono-scaling-type', 'Scaling Type', 1, 100),
+            # ('#mono-q', 'Q', 1, 100),
+            # ('#mono-gamma', 'Gamma', 1, 100),
+            # ('#rgb-stretch', 'Stretch', 1, 1000),
+            # ('#rgb-q', 'Q', 1, 100),
+            # ('#rgb-gamma', 'Gamma', 1, 100),
+            # ('#rgb-standard-zp', 'Standard ZP', 1, 100),
         ]
 
         for selector, name, min_val, max_val in numeric_validations:

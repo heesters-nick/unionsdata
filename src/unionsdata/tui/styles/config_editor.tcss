@@ -316,7 +316,8 @@ CollapsibleTitle {
 }
 
 #plot-mono-container,
-#plot-rgb-container {
+#plot-rgb-container,
+#rgb-max-columns-container {
     height: auto;
     width: 100%;
 }
