@@ -1956,11 +1956,11 @@ Tips:
         source = get_select_value(self.query_one('#input-source-select', Select))
         if source == 'tiles':
             if not self.query_one('#tiles-list', TileList).get_tiles():
-                errors.append('At least one tile is required when source is "Tiles"')
+                errors.append('At least one tile is required when source is "Specific Tiles"')
         elif source == 'coordinates':
             if not self.query_one('#coordinates-list', CoordinateList).get_coordinates():
                 errors.append(
-                    'At least one coordinate pair is required when source is "Coordinates"'
+                    'At least one coordinate pair is required when source is "Sky Coordinates"'
                 )
         if source == 'dataframe':
             df_path = self.query_one('#dataframe-path', PathInput)

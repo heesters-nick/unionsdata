@@ -189,15 +189,35 @@ class CoordinateList(Static):
     }
 
     CoordinateList .button-row {
-        width: 45;
+        width: 100%;
         height: auto;
         margin-top: 1;
+    }
+
+    CoordinateList .button-spacer {
+        width: 4;
+        min-width: 4;
+        max-width: 4;
+    }
+
+    CoordinateList .button-container {
+        width: 38;
+        min-width: 38;
+        max-width: 38;
+        height: 3;
         align: center middle;
     }
 
     CoordinateList .add-row-btn {
-        margin-top: 1;
         width: auto;
+    }
+
+    CoordinateList .validation-feedback {
+        width: 1fr;
+        color: $error;
+        height: 3;
+        content-align: left middle;
+        margin-left: 1;
     }
 
     CoordinateList .empty-message {
@@ -263,11 +283,12 @@ class CoordinateList(Static):
                         id=f'coord-row-{self._row_counter}',
                     )
                     self._row_counter += 1
-            else:
-                yield Static('No coordinates added', classes='empty-message')
 
         with Horizontal(classes='button-row'):
-            yield Button('+ Add Coordinate', variant='primary', classes='add-row-btn')
+            yield Label('', classes='button-spacer')
+            with Horizontal(classes='button-container'):
+                yield Button('+ Add Coordinate', variant='primary', classes='add-row-btn')
+            yield Label('', classes='validation-feedback')
 
     def on_mount(self) -> None:
         """Initialize coordinates on mount."""
@@ -284,15 +305,6 @@ class CoordinateList(Static):
         event.row.remove()
         self._update_indices(exclude=event.row)
         self._collect_values(exclude=event.row)
-
-        # Show empty message if no rows left
-        container = self.query_one('#coord-rows-container', Vertical)
-        remaining_rows = [r for r in container.query(CoordinateRow) if r is not event.row]
-
-        if not remaining_rows:
-            # Only add empty message if it's not already there
-            if not list(container.query('.empty-message')):
-                container.mount(Static('No coordinates added', classes='empty-message'))
 
     def on_coordinate_row_value_changed(self, event: CoordinateRow.ValueChanged) -> None:
         """Handle value changes in rows."""
@@ -332,12 +344,11 @@ class CoordinateList(Static):
             current_idx += 1
 
     def _update_validation_ui(self) -> None:
+        """Update validation feedback visibility."""
         try:
             label = self.query_one('.validation-feedback', Label)
             if not self.coordinates:
-                label.update(
-                    '✗ At least one coordinate pair is required when source is "Coordinates"'
-                )
+                label.update('✗ At least one coordinate pair required')
             else:
                 label.update('')
         except Exception:
@@ -391,8 +402,6 @@ class CoordinateList(Static):
                 )
                 self._row_counter += 1
                 container.mount(new_row)
-        else:
-            container.mount(Static('No coordinates added', classes='empty-message'))
 
         self.coordinates = list(coordinates)
         self._update_validation_ui()
@@ -452,15 +461,35 @@ class TileList(Static):
     }
 
     TileList .button-row {
-        width: 45;
+        width: 100%;
         height: auto;
         margin-top: 1;
+    }
+
+    TileList .button-spacer {
+        width: 4;
+        min-width: 4;
+        max-width: 4;
+    }
+
+    TileList .button-container {
+        width: 38;
+        min-width: 38;
+        max-width: 38;
+        height: 3;
         align: center middle;
     }
 
     TileList .add-row-btn {
-        margin-top: 1;
         width: auto;
+    }
+
+    TileList .validation-feedback {
+        width: 1fr;
+        color: $error;
+        height: 3;
+        content-align: left middle;
+        margin-left: 1;
     }
 
     TileList .empty-message {
@@ -524,14 +553,17 @@ class TileList(Static):
                         id=f'tile-row-{self._row_counter}',
                     )
                     self._row_counter += 1
-            else:
-                yield Static('No tiles added', classes='empty-message')
+
         with Horizontal(classes='button-row'):
-            yield Button('+ Add Tile', variant='primary', classes='add-row-btn')
+            yield Label('', classes='button-spacer')
+            with Horizontal(classes='button-container'):
+                yield Button('+ Add Tile', variant='primary', classes='add-row-btn')
+            yield Label('', classes='validation-feedback')
 
     def on_mount(self) -> None:
         """Initialize tiles on mount."""
         self.tiles = list(self._initial_tiles)
+        self._update_validation_ui()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle add button press."""
@@ -543,14 +575,6 @@ class TileList(Static):
         event.row.remove()
         self._update_indices(exclude=event.row)
         self._collect_values(exclude=event.row)
-
-        # Show empty message if no rows left
-        container = self.query_one('#tile-rows-container', Vertical)
-        remaining_rows = [r for r in container.query(CoordinateRow) if r is not event.row]
-
-        if not remaining_rows:
-            if not list(container.query('.empty-message')):
-                container.mount(Static('No tiles added', classes='empty-message'))
 
     def on_coordinate_row_value_changed(self, event: CoordinateRow.ValueChanged) -> None:
         """Handle value changes in rows."""
@@ -589,6 +613,17 @@ class TileList(Static):
             row._index = current_idx
             current_idx += 1
 
+    def _update_validation_ui(self) -> None:
+        """Update validation feedback visibility."""
+        try:
+            label = self.query_one('.validation-feedback', Label)
+            if not self.tiles:
+                label.update('✗ At least one tile required')
+            else:
+                label.update('')
+        except Exception:
+            pass
+
     def _collect_values(self, exclude: CoordinateRow | None = None) -> None:
         """Collect values, ignoring excluded row."""
         container = self.query_one('#tile-rows-container', Vertical)
@@ -607,6 +642,7 @@ class TileList(Static):
 
         self.tiles = new_tiles
         self.post_message(self.Changed(self, self.tiles))
+        self._update_validation_ui()
 
     def get_tiles(self) -> list[tuple[int, int]]:
         """Get the current list of tiles."""
@@ -636,10 +672,9 @@ class TileList(Static):
                 )
                 self._row_counter += 1
                 container.mount(new_row)
-        else:
-            container.mount(Static('No tiles added', classes='empty-message'))
 
         self.tiles = list(tiles)
+        self._update_validation_ui()
 
     def is_valid(self) -> bool:
         """Check if valid (not empty and all rows valid)."""

@@ -133,21 +133,6 @@ Input.warning {
     display: none;
 }
 
-/* Input source specific containers */
-#tiles-input-section,
-#coordinates-input-section,
-#dataframe-input-section {
-    margin-top: 1;
-    padding: 1;
-    border: solid $secondary;
-    height: auto;
-}
-
-/* Ensure TileList and CoordinateList expand properly for scrolling */
-TileList, CoordinateList {
-    height: auto;
-}
-
 /* Button bar at bottom */
 #button-bar {
     height: auto;
