@@ -2,6 +2,7 @@ import logging
 import multiprocessing
 import posixpath
 import queue
+import shutil
 import signal
 import subprocess
 import threading
@@ -353,26 +354,49 @@ def download_tile_one_band(
                 text=True,
             )
 
-            while process.poll() is None:
-                if shutdown_flag.is_set():
-                    logger.warning(f'Shutdown requested, terminating download of {tile_fitsname}')
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    # Clean up temp file if it exists
-                    cleanup_temp_file(temp_path)
-                    return 'failed'
-                time.sleep(0.1)
+            stdout_data = []
+            stderr_data = []
+
+            while True:
+                try:
+                    # Wait for output or completion for 0.5 seconds
+                    # communicate() reads pipes preventing deadlock
+                    out, err = process.communicate(timeout=0.5)
+
+                    if out:
+                        stdout_data.append(out)
+                    if err:
+                        stderr_data.append(err)
+
+                    # If we get here, process finished
+                    break
+
+                except subprocess.TimeoutExpired:
+                    # Process is still running, check shutdown signal
+                    if shutdown_flag.is_set():
+                        logger.warning(
+                            f'Shutdown requested, terminating download of {tile_fitsname}'
+                        )
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                        cleanup_temp_file(temp_path)
+                        return 'failed'
+                    # Continue waiting
+                    continue
+
+            # Reconstruct full output for logging if needed
+            stdout = ''.join(stdout_data)
+            stderr = ''.join(stderr_data)
 
             # Check if process completed successfully
             if process.returncode != 0:
-                stdout, stderr = process.communicate()
                 if stdout:
-                    logger.debug('vcp stdout:\n%s', stdout)
+                    logger.info('vcp stdout:\n%s', stdout)
                 if stderr:
-                    logger.debug('vcp stderr:\n%s', stderr)
+                    logger.info('vcp stderr:\n%s', stderr)
                 raise subprocess.CalledProcessError(process.returncode, process.args)
 
             # change to path mode
@@ -438,11 +462,22 @@ def download_tile_one_band(
             else:
                 return 'failed'
 
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            # Check if the vcp executable is actually installed
+            if shutil.which('vcp') is None:
+                logger.critical("The 'vcp' command was not found in your PATH.")
+                logger.critical('Please install the VOSpace tools: pip install vos')
+                # Trigger shutdown to stop other threads from failing identically
+                shutdown_flag.set()
+                cleanup_temp_file(temp_path)
+                return 'failed'
+
+            # If vcp exists, then the remote file is missing
             logger.error(
-                f'Failed downloading tile {tile_str(tile_numbers)} for band {band}. Retrying...'
+                f'Failed downloading tile {tile_str(tile_numbers)} for band {band}. '
+                f'File likely missing from VOSpace.'
             )
-            logger.exception(f'Tile {tile_str(tile_numbers)} not available in {band}.')
+            logger.debug(f'Details: {e}')
             # Clean up temp file on error
             cleanup_temp_file(temp_path)
             return 'failed'
