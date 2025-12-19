@@ -16,7 +16,7 @@ logging:
 runtime:
   n_download_threads: 12
   n_cutout_processes: 2
-  bands: null                                                      # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ['cfis-r']                                                # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
@@ -32,9 +32,9 @@ cutouts:
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
-  enable: false                                                    # create plots of cutouts
+  enable: true                                                     # create plots of cutouts
   catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
-  bands: null                                                      # bands to use for RGB cutouts; null = first 3 from runtime.bands
+  bands: ['cfis-r']                                                 # bands to use for RGB cutouts; null = first 3 from runtime.bands
   size_pix: 512                                                    # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
@@ -43,7 +43,13 @@ plotting:
   show_plot: false                                                 # display plots interactively
   save_format: "png"                                               # output format: pdf, png, jpg, svg
 
-  rgb:
+  mono:                                                            # monochromatic plot settings
+    scaling_type: "asinh"                                          # 'asinh' or 'linear'
+    stretch: 125.0
+    Q: 7.0
+    gamma: 0.25
+
+  rgb:                                                             # rgb plot settings
     scaling_type: "asinh"                                          # 'asinh' or 'linear'
     stretch: 125.0
     Q: 7.0
@@ -84,7 +90,7 @@ paths_by_machine:
     root_dir_data: "/home/nick/astro/unionsdata/data"
     dir_tables: "/home/nick/astro/unionsdata/tables"
     dir_figures: "/home/nick/astro/unionsdata/figures"
-    cert_path: "something/something/cadcproxy.pem"
+    cert_path: "/home/nick/.ssl/cadcproxy.pem"
 
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"

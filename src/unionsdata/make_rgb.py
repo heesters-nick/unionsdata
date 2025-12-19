@@ -198,6 +198,56 @@ def generate_rgb(
     return result
 
 
+def normalize_mono(
+    cutout: NDArray[np.float32],
+    scaling_type: Literal['asinh', 'linear'] = 'asinh',
+    stretch: float = 125,
+    Q: float = 7.0,
+    gamma: float = 0.25,
+) -> NDArray[np.float32]:
+    """Normalize a single-band cutout for display.
+
+    Applies anomaly detection, scaling, and gamma correction to a monochromatic image.
+
+    Args:
+        cutout: 2D array of shape (height, width)
+        scaling_type: Type of scaling ('asinh' or 'linear')
+        stretch: Scaling factor controlling overall brightness
+        Q: Softening parameter for asinh scaling
+        gamma: Gamma correction factor
+
+    Returns:
+        Normalized grayscale image with shape (height, width) and values in [0, 1]
+    """
+    # Apply anomaly detection
+    image = detect_anomaly(cutout.copy())
+
+    # Handle empty images
+    if np.count_nonzero(image) == 0:
+        return np.zeros(image.shape, dtype=np.float32)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        if scaling_type == 'asinh':
+            frac = 0.1
+            scaled = image * np.arcsinh(Q * image / stretch) * frac / (np.arcsinh(frac * Q) * image)
+            scaled = np.nan_to_num(scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        elif scaling_type == 'linear':
+            scaled = image * stretch
+        else:
+            raise ValueError(f'Unknown scaling type: {scaling_type}')
+
+        # Apply gamma correction
+        if gamma is not None:
+            mask = np.abs(scaled) <= 1e-9
+            scaled = np.sign(scaled) * (np.abs(scaled) ** gamma)
+            scaled[mask] = 0
+
+        # Clip to [0, 1]
+        scaled = np.clip(scaled, 0, 1).astype(np.float32)
+
+    return scaled
+
+
 def adjust_flux_with_zp(
     flux: NDArray[np.float32], current_zp: float | int, standard_zp: float | int
 ) -> NDArray[np.float32]:

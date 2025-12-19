@@ -417,7 +417,7 @@ def run_plot(args: argparse.Namespace) -> None:
     cfg_dict = settings_to_dict(cfg)
 
     # Print settings in human readable format
-    cfg_yaml = yaml.safe_dump(cfg_dict, sort_keys=False)
+    cfg_yaml = yaml_to_string(cfg_dict)
     logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
     # make sure necessary directories exist

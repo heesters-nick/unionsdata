@@ -526,6 +526,12 @@ class ConfigEditorApp(App[None]):
                     'gamma': 0.25,
                     'standard_zp': 30.0,
                 },
+                'mono': {
+                    'scaling_type': 'asinh',
+                    'stretch': 125.0,
+                    'Q': 7.0,
+                    'gamma': 0.25,
+                },
             },
             'inputs': {
                 'source': 'tiles',
@@ -821,6 +827,7 @@ class ConfigEditorApp(App[None]):
         is_enabled = plotting.get('enable', False)
 
         rgb = plotting.get('rgb', {})
+        mono = plotting.get('mono', {})
 
         # get initial plot bands from config
         plot_bands = plotting.get('bands') or []
@@ -919,7 +926,7 @@ class ConfigEditorApp(App[None]):
                             formats, value=save_format, id='plot-save-format', classes='field-input'
                         )
 
-                    # --- MODE SWITCH ---
+                    # switch between RGB and mono mode
                     yield Static('Plot Mode', classes='section-title')
                     with Horizontal(classes='field-row'):
                         yield Label('Monochromatic', classes='field-label')
@@ -927,7 +934,7 @@ class ConfigEditorApp(App[None]):
                         yield Switch(value=is_rgb, id='plot-mode-switch')
                         yield Label('RGB', classes='field-label')
 
-                    # --- MONO CONTAINER (Hidden if RGB) ---
+                    # mono mode (hidden if RGB)
                     with Vertical(id='plot-mono-container', classes='hidden' if is_rgb else ''):
                         yield Static('Monochromatic Plotting Options', classes='section-title')
                         # Single Band Selector (All known bands)
@@ -941,7 +948,60 @@ class ConfigEditorApp(App[None]):
                                 classes='field-input',
                             )
 
-                    # --- RGB CONTAINER (Hidden if Mono) ---
+                        # Scaling
+                        scaling_type = mono.get('scaling_type', 'asinh')
+                        scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Scaling Type')
+                                yield InfoIcon('asinh preserves both bright and faint details')
+                                yield Label(':')
+                            yield Select(
+                                scaling_types,
+                                value=scaling_type,
+                                id='mono-scaling-type',
+                                classes='field-input',
+                            )
+
+                        # Stretch
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Stretch')
+                                yield InfoIcon('Scaling factor controlling overall brightness')
+                                yield Label(':')
+                            yield Input(
+                                value=str(mono.get('stretch', 125.0)),
+                                id='mono-stretch',
+                                classes='field-input',
+                            )
+
+                        # Q
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Q')
+                                yield InfoIcon(
+                                    'Softening parameter for asinh (higher = more linear)'
+                                )
+                                yield Label(':')
+                            yield Input(
+                                value=str(mono.get('Q', 7.0)),
+                                id='mono-q',
+                                classes='field-input',
+                            )
+
+                        # Gamma
+                        with Horizontal(classes='field-row'):
+                            with Horizontal(classes='field-label'):
+                                yield Label('Gamma')
+                                yield InfoIcon('Gamma correction (lower = enhances faint features)')
+                                yield Label(':')
+                            yield Input(
+                                value=str(mono.get('gamma', 0.25)),
+                                id='mono-gamma',
+                                classes='field-input',
+                            )
+
+                    # RGB mode (hidden if mono)
                     with Vertical(id='plot-rgb-container', classes='' if is_rgb else 'hidden'):
                         yield Static('RGB Plotting Options', classes='section-title')
                         with Horizontal(classes='field-row'):
@@ -1650,6 +1710,12 @@ Tips:
                 'gamma': float(self._get_input_value('#rgb-gamma', '0.25')),
                 'standard_zp': float(self._get_input_value('#rgb-standard-zp', '30.0')),
             },
+            'mono': {
+                'scaling_type': str(self.query_one('#mono-scaling-type', Select).value),
+                'stretch': float(self._get_input_value('#mono-stretch', '125.0')),
+                'Q': float(self._get_input_value('#mono-q', '7.0')),
+                'gamma': float(self._get_input_value('#mono-gamma', '0.25')),
+            },
         }
 
         # inputs
@@ -1782,12 +1848,16 @@ Tips:
                 if not selected_rgb or len(selected_rgb) != 3:
                     errors.append('All three RGB bands must be selected')
             else:
+                # validate mono-specific fields
+                mono_selects = {'#mono-scaling-type': 'Scaling Type', '#plot-mono-band': 'Band'}
                 # Validate Mono band
-                try:
-                    if is_select_empty(self.query_one('#plot-mono-band', Select)):
-                        errors.append('Monochromatic Band must be selected')
-                except Exception:
-                    pass
+                for selector, name in mono_selects.items():
+                    try:
+                        select = self.query_one(selector, Select)
+                        if is_select_empty(select):
+                            errors.append(f'{name} must be selected')
+                    except Exception:
+                        pass
 
         # validate paths
         cert_path = self.query_one('#path-cert', PathInput)

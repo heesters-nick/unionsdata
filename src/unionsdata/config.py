@@ -71,6 +71,16 @@ class RGBCfg(BaseModel):
     standard_zp: float = 30.0
 
 
+class MonoCfg(BaseModel):
+    """Monochromatic scaling configuration"""
+
+    model_config = ConfigDict(extra='forbid')
+    scaling_type: Literal['asinh', 'linear'] = 'asinh'
+    stretch: float = 125.0
+    Q: float = 7.0
+    gamma: float = 0.25
+
+
 class PlottingCfg(BaseModel):
     """Plotting configuration."""
 
@@ -86,6 +96,7 @@ class PlottingCfg(BaseModel):
     show_plot: bool = False
     save_format: Literal['pdf', 'png', 'jpg', 'svg'] = 'pdf'
     rgb: RGBCfg = Field(default_factory=RGBCfg)
+    mono: MonoCfg = Field(default_factory=MonoCfg)
 
 
 class ColumnMap(BaseModel):

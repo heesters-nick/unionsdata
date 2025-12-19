@@ -10,7 +10,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from unionsdata.config import BandDict
-from unionsdata.make_rgb import generate_rgb, preprocess_cutout
+from unionsdata.make_rgb import generate_rgb, normalize_mono, preprocess_cutout
 from unionsdata.utils import get_bands_short_string, get_dataset
 
 logger = logging.getLogger(__name__)
@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 class CutoutData(TypedDict):
     """Dictionary containing loaded cutout data and metadata."""
 
-    cutouts: NDArray[np.float32]  # Raw: (n, 3, h, w), RGB: (n, h, w, 3)
+    cutouts: NDArray[np.float32]  # Raw: (n, n_bands, h, w), Processed: (n, h, w, 3) or (n, h, w)
     ra: NDArray[np.float32]
     dec: NDArray[np.float32]
     tile: NDArray[np.object_]
     object_id: NDArray[np.object_]
-    bands: list[str]  # list of 3 band names used for RGB
+    bands: list[str]  # list of 1 or 3 band names
 
 
 def load_cutouts(
@@ -39,7 +39,7 @@ def load_cutouts(
 
     Args:
         catalog_path: Path to augmented catalog CSV with cutout_created column
-        bands_to_plot: List of exactly 3 band names for RGB visualization
+        bands_to_plot: List of exactly 1 or 3 band names for RGB visualization
         data_dir: Root data directory containing tile subdirectories
         cutout_subdir: Subdirectory name within each tile dir containing HDF5 files
         cutout_size: Square size of cutouts in pixels
@@ -54,13 +54,13 @@ def load_cutouts(
             - 'bands': list of 3 band names
 
     Raises:
-        ValueError: If bands_to_plot is not exactly 3 bands
+        ValueError: If bands_to_plot is not exactly 1 or 3 bands
         FileNotFoundError: If catalog doesn't exist
         RuntimeError: If no cutouts can be loaded with requested bands
     """
     # Validate inputs
-    if len(bands_to_plot) != 3:
-        raise ValueError(f'Expected exactly 3 bands for plotting, got {len(bands_to_plot)}')
+    if len(bands_to_plot) not in (1, 3):
+        raise ValueError(f'Expected 1 or 3 bands for plotting, got {len(bands_to_plot)}')
 
     if not catalog_path.exists():
         raise FileNotFoundError(f'Catalog not found: {catalog_path}')
@@ -227,9 +227,10 @@ def cutouts_to_rgb(
     standard_zp: float = 30.0,
 ) -> CutoutData:
     """
-    Process raw cutouts to RGB images ready for plotting.
+    Process raw cutouts to images ready for plotting.
 
-    Applies flux adjustment, anomaly detection, and RGB scaling to each cutout.
+    For 3 bands: applies flux adjustment, anomaly detection, and RGB scaling.
+    For 1 band: applies anomaly detection and scaling, returns grayscale.
 
     Args:
         cutout_data: Dictionary with raw cutout data from load_cutouts
@@ -241,52 +242,67 @@ def cutouts_to_rgb(
         standard_zp: Standard zero-point for flux normalization
 
     Returns:
-        CutoutData dictionary with RGB images (n_objects, h, w, 3) and unchanged metadata
+        CutoutData dictionary with processed images:
+            - RGB mode: (n_objects, h, w, 3)
+            - Mono mode: (n_objects, h, w)
 
     Raises:
-        ValueError: If cutout_data doesn't have exactly 3 bands
+        ValueError: If cutout_data doesn't have 1 or 3 bands
     """
     n_objects = len(cutout_data['cutouts'])
     bands = cutout_data['bands']
+    n_bands = len(bands)
 
-    if len(bands) != 3:
-        raise ValueError(f'Expected 3 bands in cutout_data, got {len(bands)}')
+    if n_bands not in (1, 3):
+        raise ValueError(f'Expected 1 or 3 bands in cutout_data, got {n_bands}')
 
-    logger.debug(f'Processing {n_objects} cutouts to RGB with bands: {bands}')
+    is_mono = n_bands == 1
+    mode_str = 'monochromatic' if is_mono else 'RGB'
+    logger.debug(f'Processing {n_objects} cutouts to {mode_str} with bands: {bands}')
 
-    # Pre-allocate RGB array
     cutout_size = cutout_data['cutouts'].shape[2]  # Square cutouts
-    rgb_images = np.zeros((n_objects, cutout_size, cutout_size, 3), dtype=np.float32)
 
-    # Process each cutout
-    for i in range(n_objects):
-        cutout = cutout_data['cutouts'][i]  # shape: (3, h, w)
+    if is_mono:
+        # Mono: output shape (n, h, w)
+        images = np.zeros((n_objects, cutout_size, cutout_size), dtype=np.float32)
 
-        # Preprocess: flux adjustment, anomaly detection, channel synthesis
-        cutout_prep = preprocess_cutout(
-            cutout=cutout, bands=bands, in_dict=band_config, standard_zp=standard_zp
-        )
+        for i in range(n_objects):
+            images[i] = normalize_mono(
+                cutout=cutout_data['cutouts'][i, 0],
+                scaling_type=scaling_type,
+                stretch=stretch,
+                Q=Q,
+                gamma=gamma,
+            )
+    else:
+        # RGB: output shape (n, h, w, 3)
+        images = np.zeros((n_objects, cutout_size, cutout_size, 3), dtype=np.float32)
 
-        # Generate RGB: scaling and gamma correction
-        rgb_image = generate_rgb(
-            cutout=cutout_prep, scaling_type=scaling_type, stretch=stretch, Q=Q, gamma=gamma
-        )
+        for i in range(n_objects):
+            cutout_prep = preprocess_cutout(
+                cutout=cutout_data['cutouts'][i],
+                bands=bands,
+                in_dict=band_config,
+                standard_zp=standard_zp,
+            )
+            images[i] = generate_rgb(
+                cutout=cutout_prep,
+                scaling_type=scaling_type,
+                stretch=stretch,
+                Q=Q,
+                gamma=gamma,
+            )
 
-        rgb_images[i] = rgb_image
+    logger.debug(f'Successfully processed {n_objects} cutouts to {mode_str}')
 
-    logger.debug(f'Successfully processed {n_objects} cutouts to RGB')
-
-    # Return same structure with RGB cutouts
-    result: CutoutData = {
-        'cutouts': rgb_images,
+    return {
+        'cutouts': images,
         'ra': cutout_data['ra'],
         'dec': cutout_data['dec'],
         'tile': cutout_data['tile'],
         'object_id': cutout_data['object_id'],
         'bands': cutout_data['bands'],
     }
-
-    return result
 
 
 def find_most_recent_catalog(tables_dir: Path) -> Path | None:
@@ -337,10 +353,10 @@ def plot_cutouts(
     show_plot: bool,
 ) -> None:
     """
-    Display galaxy cutouts with prediction probabilities in a chosen format.
+    Display galaxy cutouts in a chosen format.
 
-    This function creates a visualization of galaxy cutouts, either as a grid of RGB
-    images or as individual channel displays plus RGB composite.
+    For RGB data: supports 'grid' or 'channel' mode.
+    For monochromatic data: always uses 'grid' mode.
 
     Args:
         cutout_data: Dictionary with cutout data and metadata
@@ -362,43 +378,54 @@ def plot_cutouts(
     all_coords = list(zip(cutout_data['ra'], cutout_data['dec'], strict=True))
     ids = cutout_data['object_id']
 
-    if cutouts.ndim != 4 or cutouts.shape[-1] != 3:
+    # Detect mono vs RGB from array shape
+    is_mono = cutouts.ndim == 3  # (n, h, w) for mono, (n, h, w, 3) for RGB
+
+    if not is_mono and (cutouts.ndim != 4 or cutouts.shape[-1] != 3):
         raise ValueError(
-            f'Expected RGB cutouts with shape (n, h, w, 3), got {cutouts.shape}. '
+            f'Expected shape (n, h, w) for mono or (n, h, w, 3) for RGB, got {cutouts.shape}. '
             f'Did you run cutouts_to_rgb()?'
         )
 
+    # Force grid mode for mono
+    if is_mono and mode == 'channel':
+        logger.debug('Channel mode not supported for monochromatic data, using grid mode.')
+        mode = 'grid'
+
     # Display cutouts in regular grid
     if mode == 'grid':
-        logger.debug('Plotting RGB cutouts in a grid..')
-        # Calculate grid dimensions
-        n_cols = min(max_cols, n_total)  # Max 5 columns
+        mode_str = 'monochromatic' if is_mono else 'RGB'
+        logger.debug(f'Plotting {mode_str} cutouts in a grid..')
+
+        n_cols = min(max_cols, n_total)
         n_rows = (n_total + n_cols - 1) // n_cols  # Ceiling division
 
         if figsize is None:
             figsize = (3 * n_cols, 3 * n_rows)
 
         fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
-
-        # Handle different axis array shapes efficiently
         axes = np.atleast_2d(axes)
 
-        # Display each cutout in original order
         for idx in range(n_total):
             i, j = divmod(idx, n_cols)
             ax = axes[i, j]
-            ax.imshow(cutouts[idx], origin='lower', aspect='equal')
+
+            if is_mono:
+                ax.imshow(cutouts[idx], cmap='gray', origin='lower', aspect='equal')
+            else:
+                ax.imshow(cutouts[idx], origin='lower', aspect='equal')
+
             coord_text = f'{all_coords[idx][0]:.4f}, {all_coords[idx][1]:.4f}'
             label_text = f'{ids[idx]}\n{cutout_data["tile"][idx]}'
 
             ax.text(
                 0.03,
-                0.97,  # x,y in axes coordinates
+                0.97,
                 label_text,
                 color='orange',
                 fontweight='bold',
                 bbox={'facecolor': 'black', 'alpha': 0.7, 'pad': 2},
-                transform=ax.transAxes,  # Use axes coordinates instead of data coordinates
+                transform=ax.transAxes,
                 verticalalignment='top',
                 horizontalalignment='left',
             )
@@ -410,9 +437,9 @@ def plot_cutouts(
                 color='orange',
                 fontweight='bold',
                 bbox={'facecolor': 'black', 'alpha': 0.7, 'pad': 2},
-                transform=ax.transAxes,  # Use axes coordinates instead of data coordinates
-                verticalalignment='bottom',  # Align to top of text box
-                horizontalalignment='right',  # Align to left of text box
+                transform=ax.transAxes,
+                verticalalignment='bottom',
+                horizontalalignment='right',
             )
 
             ax.set_xticks([])
@@ -425,25 +452,21 @@ def plot_cutouts(
 
         plt.tight_layout(pad=0.5)
 
-    # Display cutouts row-wise with individual channels and RGB image
+    # Display cutouts row-wise with individual channels and RGB image (RGB only)
     elif mode == 'channel':
         logger.debug('Plotting cutouts with individual channels plus RGB..')
+
         if figsize is None:
             figsize = (12, 3 * n_total)
 
-        # Create figure
         fig, axes = plt.subplots(n_total, 4, figsize=figsize, constrained_layout=True)
-
-        # Handle case with single cutout
         axes = np.atleast_2d(axes)
 
-        # Set column headers once
         col_titles = ['Red', 'Green', 'Blue', 'RGB']
         for j, title in enumerate(col_titles):
-            if n_total > 0:  # Only add titles if we have items to display
+            if n_total > 0:
                 axes[0, j].set_title(title, fontsize=18, fontweight='bold', pad=10)
 
-        # Process and display all cutouts and placeholders in original order
         for i in range(n_total):
             img = cutouts[i]
 
@@ -451,8 +474,8 @@ def plot_cutouts(
             label_text = f'{ids[i]}\n{cutout_data["tile"][i]}'
             status_color = 'orange'
 
-            # Display individual channels for matched cutouts
-            for j in range(3):  # R, G, B channels
+            # Display individual channels
+            for j in range(3):
                 axes[i, j].imshow(img[:, :, j], cmap='gray', origin='lower', aspect='equal')
                 axes[i, j].set_xticks([])
                 axes[i, j].set_yticks([])
@@ -467,12 +490,12 @@ def plot_cutouts(
                 fontweight='bold',
                 bbox={'facecolor': 'black', 'alpha': 0.7, 'pad': 2},
                 transform=axes[i, 3].transAxes,
-                verticalalignment='bottom',  # Align to top of text box
-                horizontalalignment='right',  # Align to left of text box
+                verticalalignment='bottom',
+                horizontalalignment='right',
             )
 
             axes[i, 3].text(
-                0.03,  # x,y in axes coordinates
+                0.03,
                 0.97,
                 label_text,
                 color=status_color,
