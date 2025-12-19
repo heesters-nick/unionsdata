@@ -217,31 +217,32 @@ def make_multiband_cutouts(
     size_half = cutout_size // 2
     y_max, x_max = multiband_data.shape[1], multiband_data.shape[2]
 
-    for i, (x, y) in enumerate(zip(xs, ys, strict=True)):
-        # Calculate bounds in image coordinates
-        y_start = max(0, y - size_half)
-        y_end = min(y_max, y + (cutout_size - size_half))
-        x_start = max(0, x - size_half)
-        x_end = min(x_max, x + (cutout_size - size_half))
+    # Vectorized bounds calculation for efficiency
+    y_starts = np.maximum(0, ys - size_half)
+    y_ends = np.minimum(y_max, ys + (cutout_size - size_half))
+    x_starts = np.maximum(0, xs - size_half)
+    x_ends = np.minimum(x_max, xs + (cutout_size - size_half))
 
-        # Check if object is completely outside image
-        if y_start >= y_end or x_start >= x_end:
-            logger.warning(f'Tile {tile_str}: Object at ({x}, {y}) is outside image bounds')
-            continue
+    # Identify valid objects (partially inside image)
+    valid_mask = (y_starts < y_ends) & (x_starts < x_ends)
 
-        # Calculate corresponding positions in cutout array
-        cy_start = y_start - y + size_half
-        cy_end = y_end - y + size_half
-        cx_start = x_start - x + size_half
-        cx_end = x_end - x + size_half
+    if not np.all(valid_mask):
+        logger.warning(f'Tile {tile_str}: {np.sum(~valid_mask)} objects outside image bounds')
 
-        # Extract cutout from ALL bands at once
-        # Shape: (n_bands, cutout_y, cutout_x)
-        cutouts[i, :, cy_start:cy_end, cx_start:cx_end] = multiband_data[
-            :, y_start:y_end, x_start:x_end
-        ]
+    # Fill cutouts
+    for i in np.where(valid_mask)[0]:
+        y, x = ys[i], xs[i]
+        ys_i, ye_i = y_starts[i], y_ends[i]
+        xs_i, xe_i = x_starts[i], x_ends[i]
 
-    logger.debug(f'Tile {tile_str}: Created {n_objects} cutouts in {n_bands} bands')
+        # Calculate target positions in the cutout array
+        cys = ys_i - y + size_half
+        cye = ye_i - y + size_half
+        cxs = xs_i - x + size_half
+        cxe = xe_i - x + size_half
+
+        cutouts[i, :, cys:cye, cxs:cxe] = multiband_data[:, ys_i:ye_i, xs_i:xe_i]
+
     return cutouts
 
 
@@ -369,6 +370,7 @@ def create_cutouts_for_tile(
     tile_key = tile_str(tile)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f'{tile_key}_cutouts_{cutout_size}.h5'
+    BATCH_SIZE = 1000
 
     # Sort requested bands by wavelength
     bands = get_wavelength_order(bands, all_band_dictionary)
@@ -396,14 +398,23 @@ def create_cutouts_for_tile(
             tile_dir=tile_dir, tile=tile, bands=bands, in_dict=all_band_dictionary
         )
 
-        cutouts = make_multiband_cutouts(
-            multiband_data=multiband_data,
-            tile_str=tile_key,
-            df=catalog,
-            cutout_size=cutout_size,
-        )
+        # Process and write in batches to avoid OOM
+        for start_idx in range(0, len(catalog), BATCH_SIZE):
+            end_idx = min(start_idx + BATCH_SIZE, len(catalog))
+            batch_df = catalog.iloc[start_idx:end_idx].reset_index(drop=True)
 
-        write_to_h5(output_path, cutouts, catalog, loaded_bands, tile_key, all_band_dictionary)
+            batch_cutouts = make_multiband_cutouts(
+                multiband_data=multiband_data,
+                tile_str=tile_key,
+                df=batch_df,
+                cutout_size=cutout_size,
+            )
+
+            # write_to_h5 handles creation (1st batch) and appending (subsequent batches) automatically
+            write_to_h5(
+                output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
+            )
+
         return len(catalog), 0, 0
 
     # File exists - determine what's new
@@ -486,21 +497,21 @@ def create_cutouts_for_tile(
             tile_dir=tile_dir, tile=tile, bands=all_bands, in_dict=all_band_dictionary
         )
 
-        new_object_cutouts = make_multiband_cutouts(
-            multiband_data=multiband_data,
-            tile_str=tile_key,
-            df=new_object_catalog,
-            cutout_size=cutout_size,
-        )
+        # Process and append in batches
+        for start_idx in range(0, len(new_object_catalog), BATCH_SIZE):
+            end_idx = min(start_idx + BATCH_SIZE, len(new_object_catalog))
+            batch_df = new_object_catalog.iloc[start_idx:end_idx].reset_index(drop=True)
 
-        write_to_h5(
-            output_path,
-            new_object_cutouts,
-            new_object_catalog,
-            loaded_bands,
-            tile_key,
-            all_band_dictionary,
-        )
+            batch_cutouts = make_multiband_cutouts(
+                multiband_data=multiband_data,
+                tile_str=tile_key,
+                df=batch_df,
+                cutout_size=cutout_size,
+            )
+
+            write_to_h5(
+                output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
+            )
 
     return n_new_objects, n_updated_objects, n_skipped_objects
 
