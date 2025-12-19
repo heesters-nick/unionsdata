@@ -376,6 +376,18 @@ def create_cutouts_for_tile(
     # Analyze existing file state
     existing_info = analyze_existing_file(output_path)
 
+    # Handle corruption: File exists on disk, but analysis failed (exists=False)
+    if output_path.exists() and not existing_info.exists:
+        logger.warning(
+            f'Tile {tile_key}: Output file exists but appears corrupt or unreadable. '
+            f'Deleting and recreating: {output_path}'
+        )
+        try:
+            output_path.unlink()
+        except OSError as e:
+            logger.error(f'Failed to delete corrupt file {output_path}: {e}')
+            return 0, 0, 0  # Fail gracefully
+
     if not existing_info.exists:
         # Case 1: No existing file - create cutouts for all objects
         logger.debug(f'Tile {tile_key}: Creating new file with {len(catalog)} objects')
