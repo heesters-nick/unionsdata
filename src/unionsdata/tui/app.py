@@ -1305,6 +1305,9 @@ class ConfigEditorApp(App[None]):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Handle select widget changes."""
+        # Immediately clear error style if present
+        event.control.remove_class('error-border')
+
         self._dirty = True
         self._update_header()
 
@@ -1800,6 +1803,14 @@ Tips:
         except Exception:
             return default
 
+    def _mark_invalid(self, selector: str) -> None:
+        """Helper to apply error styling to a specific widget."""
+        try:
+            widget = self.query_one(selector)
+            widget.add_class('error-border')
+        except Exception:
+            pass
+
     def _validate_config(self) -> list[str]:
         """Validate the current configuration and return list of errors."""
         errors: list[str] = []
@@ -1823,6 +1834,9 @@ Tips:
                 select = self.query_one(selector, Select)
                 if is_select_empty(select):
                     errors.append(f'{name} must be selected')
+                    self._mark_invalid(selector)
+                else:
+                    select.remove_class('error-border')
             except Exception:
                 pass
 
@@ -1899,6 +1913,9 @@ Tips:
                 # Check if the value is empty
                 if not widget.value.strip():
                     errors.append(f'{name} cannot be empty')
+                    self._mark_invalid(selector)
+                else:
+                    widget.remove_class('error-border')
             except Exception:
                 pass
 
@@ -1912,6 +1929,9 @@ Tips:
                 errors.append(
                     f'Band constraint ({constraint}) cannot exceed the number of requested bands ({total_bands})'
                 )
+                self._mark_invalid('#band-constraint')
+            else:
+                self.query_one('#band-constraint', Select).remove_class('error-border')
         except Exception:
             pass
 
@@ -1929,6 +1949,9 @@ Tips:
                     select = self.query_one(selector, Select)
                     if is_select_empty(select):
                         errors.append(f'{name} must be selected')
+                        self._mark_invalid(selector)
+                    else:
+                        select.remove_class('error-border')
                 except Exception:
                     pass
             # check if we are in RGB or Mono mode
@@ -1945,6 +1968,9 @@ Tips:
                         select = self.query_one(selector, Select)
                         if is_select_empty(select):
                             errors.append(f'{name} must be selected')
+                            self._mark_invalid(selector)
+                        else:
+                            select.remove_class('error-border')
                     except Exception:
                         pass
 
@@ -1953,6 +1979,9 @@ Tips:
                 selected_rgb = rgb_selector.get_selected_bands()
                 if not selected_rgb or len(selected_rgb) != 3:
                     errors.append('All three RGB bands must be selected')
+                    self._mark_invalid('#rgb-band-selector')
+                else:
+                    rgb_selector.remove_class('error-border')
             else:
                 # validate mono-specific fields
                 mono_selects = {'#mono-scaling-type': 'Scaling Type', '#plot-mono-band': 'Band'}
@@ -1962,6 +1991,9 @@ Tips:
                         select = self.query_one(selector, Select)
                         if is_select_empty(select):
                             errors.append(f'{name} must be selected')
+                            self._mark_invalid(selector)
+                        else:
+                            select.remove_class('error-border')
                     except Exception:
                         pass
 
