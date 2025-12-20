@@ -432,10 +432,16 @@ class NewProfileDialog(ModalScreen[str | None]):
 
     def _submit(self) -> None:
         name = self.query_one('#profile-name', Input).value.strip()
-        if name:
-            self.dismiss(name)
-        else:
+        if not name:
             self.notify('Profile name cannot be empty', severity='error')
+            return
+
+        # Check for invalid filename characters
+        if re.search(r'[\\/:\*\?"<>\|]', name):
+            self.notify('Profile name contains invalid characters', severity='error')
+            return
+
+        self.dismiss(name)
 
 
 class ConfigEditorApp(App[None]):
@@ -1798,6 +1804,10 @@ Tips:
         """Validate the current configuration and return list of errors."""
         errors: list[str] = []
 
+        # Validate logging name
+        if not self._get_input_value('#logging-name').strip():
+            errors.append('Log Name cannot be empty')
+
         # check all Select widgets for missing selections
         selects = {
             '#machine-select': 'Machine',
@@ -1839,6 +1849,13 @@ Tips:
             except ValueError:
                 errors.append(f'{name} must be a number')
 
+        # Validate Cutout Subdirectory (must be a valid folder name, not a path)
+        cutout_subdir = self._get_input_value('#cutout-subdir')
+        if not cutout_subdir.strip():
+            errors.append('Cutout output subdir cannot be empty')
+        if re.search(r'[\\/:\*\?"<>\|]', cutout_subdir):
+            errors.append('Output subdir must be a simple folder name (cannot contain / or \\)')
+
         # Validate Plotting Floats (Must be numbers, no range constraints)
         if self.query_one('#plot-enable-switch', Switch).value:
             float_fields = [
@@ -1862,6 +1879,11 @@ Tips:
                 except Exception:
                     pass  # Widget might not be visible/mounted
 
+            # Validate Catalog Name characters
+            catalog_name = str(self.query_one('#plot-catalog-name', Select).value)
+            if catalog_name != 'auto' and re.search(r'[\\/:\*\?"<>\|]', catalog_name):
+                errors.append('Catalog name contains invalid characters')
+
         # Validate machine paths (Root, Data, Tables, Figures)
         machine_paths = {
             '#path-root-data': 'Data Directory',
@@ -1883,11 +1905,12 @@ Tips:
         # band constraint validation
         try:
             constraint = int(str(self.query_one('#band-constraint', Select).value))
-            total_bands = len(self._config_data.get('bands', {}))
+            selected_bands = self.query_one('#band-selector', BandSelector).get_selected()
+            total_bands = len(selected_bands)
 
             if constraint > total_bands:
                 errors.append(
-                    f'Band constraint ({constraint}) cannot exceed total available bands ({total_bands})'
+                    f'Band constraint ({constraint}) cannot exceed the number of requested bands ({total_bands})'
                 )
         except Exception:
             pass
@@ -1950,19 +1973,32 @@ Tips:
         # validate input source specifics
         source = get_select_value(self.query_one('#input-source-select', Select))
         if source == 'tiles':
-            if not self.query_one('#tiles-list', TileList).get_tiles():
+            tile_list = self.query_one('#tiles-list', TileList)
+            if not tile_list.get_tiles():
                 errors.append('At least one tile is required when source is "Specific Tiles"')
+            elif not tile_list.is_valid():
+                errors.append('One or more tiles are invalid')
         elif source == 'coordinates':
-            if not self.query_one('#coordinates-list', CoordinateList).get_coordinates():
+            coord_list = self.query_one('#coordinates-list', CoordinateList)
+            if not coord_list.get_coordinates():
                 errors.append(
                     'At least one coordinate pair is required when source is "Sky Coordinates"'
                 )
-        if source == 'table':
+            elif not coord_list.is_valid():
+                errors.append('One or more coordinates are invalid')
+        elif source == 'table':
             df_path = self.query_one('#table-path', PathInput)
             if not df_path.value.strip():
                 errors.append('Table path is required when source is "Table"')
             elif not df_path.is_valid():
                 errors.append('Table file does not exist')
+            # validate table columns
+            if not self._get_input_value('#df-col-ra').strip():
+                errors.append('RA column name cannot be empty')
+            if not self._get_input_value('#df-col-dec').strip():
+                errors.append('Dec column name cannot be empty')
+            if not self._get_input_value('#df-col-id').strip():
+                errors.append('ID column name cannot be empty')
 
         if errors:
             return errors
