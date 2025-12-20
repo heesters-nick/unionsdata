@@ -311,3 +311,10 @@ CollapsibleTitle {
     height: auto;
     width: 100%;
 }
+
+#tiles-input-section,
+#coordinates-input-section,
+#table-input-section,
+#cutout-options-container {
+    height: auto;
+}

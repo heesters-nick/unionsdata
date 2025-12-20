@@ -846,95 +846,197 @@ class ConfigEditorApp(App[None]):
                     yield Label(':')
                 yield Switch(value=is_enabled, id='plot-enable-switch')
             with Vertical(id='plotting-content', classes='' if is_enabled else 'hidden'):
-                with ScrollableContainer():
-                    # general plotting config
-                    yield Static('General Plotting Configuration', classes='section-title')
+                # general plotting config
+                yield Static('General Plotting Configuration', classes='section-title')
 
+                with Horizontal(classes='field-row'):
+                    with Horizontal(classes='field-label'):
+                        yield Label('Catalog Name')
+                        yield InfoIcon(
+                            'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
+                        )
+                        yield Label(':')
+
+                    current_catalog = plotting.get('catalog_name', 'auto')
+                    options = self._get_catalog_options()
+                    # Ensure current value is in options
+                    existing_values = {opt[1] for opt in options}
+                    if current_catalog and current_catalog not in existing_values:
+                        options.append((current_catalog, current_catalog))
+
+                    yield Select(
+                        options,
+                        value=current_catalog,
+                        id='plot-catalog-name',
+                        classes='field-input',
+                    )
+
+                # cutout size
+                with Horizontal(classes='field-row'):
+                    with Horizontal(classes='field-label'):
+                        yield Label('Size (pixels)')
+                        yield InfoIcon(
+                            'Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)'
+                        )
+                        yield Label(':')
+                    yield Input(
+                        value=str(plotting.get('size_pix', 512)),
+                        id='plot-size',
+                        classes='field-input',
+                        validators=[IntegerRange(1, 10000)],
+                    )
+
+                with Horizontal(classes='field-row'):
+                    yield Label('Save Plot:', classes='field-label')
+                    yield BetterCheckbox(
+                        'Save to disk',
+                        plotting.get('save_plot', True),
+                        id='plot-save-checkbox',
+                        classes='field-checkbox',
+                    )
+
+                with Horizontal(classes='field-row'):
+                    yield Label('Show Plot:', classes='field-label')
+                    yield BetterCheckbox(
+                        'Display plot',
+                        plotting.get('show_plot', False),
+                        id='plot-show-checkbox',
+                        classes='field-checkbox',
+                    )
+
+                save_format = plotting.get('save_format', 'pdf')
+                formats = [('PDF', 'pdf'), ('PNG', 'png'), ('JPG', 'jpg'), ('SVG', 'svg')]
+                with Horizontal(classes='field-row'):
+                    yield Label('Save Format:', classes='field-label')
+                    yield Select(
+                        formats, value=save_format, id='plot-save-format', classes='field-input'
+                    )
+
+                # switch between RGB and mono mode
+                yield Static('Plot Mode', classes='section-title')
+                with Horizontal(classes='field-row'):
+                    yield Label('Monochromatic', classes='field-label')
+                    # The Switch that controls visibility
+                    yield Switch(value=is_rgb, id='plot-mode-switch')
+                    yield Label('RGB', classes='field-label')
+
+                # mono mode (hidden if RGB)
+                with Vertical(id='plot-mono-container', classes='hidden' if is_rgb else ''):
+                    yield Static('Monochromatic Plotting Options', classes='section-title')
+                    # Single Band Selector (All known bands)
+                    all_band_opts = [(b.display, b.name) for b in BANDS]
                     with Horizontal(classes='field-row'):
-                        with Horizontal(classes='field-label'):
-                            yield Label('Catalog Name')
-                            yield InfoIcon(
-                                'Name of catalog file (without _augmented.csv suffix). Use auto to use the most recent input catalog.'
-                            )
-                            yield Label(':')
-
-                        current_catalog = plotting.get('catalog_name', 'auto')
-                        options = self._get_catalog_options()
-                        # Ensure current value is in options
-                        existing_values = {opt[1] for opt in options}
-                        if current_catalog and current_catalog not in existing_values:
-                            options.append((current_catalog, current_catalog))
-
+                        yield Label('Band:', classes='field-label')
                         yield Select(
-                            options,
-                            value=current_catalog,
-                            id='plot-catalog-name',
+                            all_band_opts,
+                            value=plot_bands[0] if plot_bands else Select.BLANK,
+                            id='plot-mono-band',
                             classes='field-input',
                         )
 
-                    # cutout size
+                    # Max columns in the cutout grid
                     with Horizontal(classes='field-row'):
                         with Horizontal(classes='field-label'):
-                            yield Label('Size (pixels)')
-                            yield InfoIcon(
-                                'Square cutout size in pixels (pixel scale: 0.1857 arcsec/pix)'
-                            )
+                            yield Label('Max Columns')
+                            yield InfoIcon('Maximum columns in the cutout grid')
                             yield Label(':')
                         yield Input(
-                            value=str(plotting.get('size_pix', 512)),
-                            id='plot-size',
+                            value=str(plotting.get('max_cols', 5)),
+                            id='plot-max-cols',
                             classes='field-input',
-                            validators=[IntegerRange(1, 10000)],
+                            validators=[IntegerRange(1, 100)],
                         )
 
+                    # Scaling
+                    scaling_type = mono.get('scaling_type', 'asinh')
+                    scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
                     with Horizontal(classes='field-row'):
-                        yield Label('Save Plot:', classes='field-label')
-                        yield BetterCheckbox(
-                            'Save to disk',
-                            plotting.get('save_plot', True),
-                            id='plot-save-checkbox',
-                            classes='field-checkbox',
-                        )
-
-                    with Horizontal(classes='field-row'):
-                        yield Label('Show Plot:', classes='field-label')
-                        yield BetterCheckbox(
-                            'Display plot',
-                            plotting.get('show_plot', False),
-                            id='plot-show-checkbox',
-                            classes='field-checkbox',
-                        )
-
-                    save_format = plotting.get('save_format', 'pdf')
-                    formats = [('PDF', 'pdf'), ('PNG', 'png'), ('JPG', 'jpg'), ('SVG', 'svg')]
-                    with Horizontal(classes='field-row'):
-                        yield Label('Save Format:', classes='field-label')
+                        with Horizontal(classes='field-label'):
+                            yield Label('Scaling Type')
+                            yield InfoIcon('asinh preserves both bright and faint details')
+                            yield Label(':')
                         yield Select(
-                            formats, value=save_format, id='plot-save-format', classes='field-input'
+                            scaling_types,
+                            value=scaling_type,
+                            id='mono-scaling-type',
+                            classes='field-input',
                         )
 
-                    # switch between RGB and mono mode
-                    yield Static('Plot Mode', classes='section-title')
+                    # Stretch
                     with Horizontal(classes='field-row'):
-                        yield Label('Monochromatic', classes='field-label')
-                        # The Switch that controls visibility
-                        yield Switch(value=is_rgb, id='plot-mode-switch')
-                        yield Label('RGB', classes='field-label')
+                        with Horizontal(classes='field-label'):
+                            yield Label('Stretch')
+                            yield InfoIcon('Scaling factor controlling overall brightness')
+                            yield Label(':')
+                        yield Input(
+                            value=str(mono.get('stretch', 125.0)),
+                            id='mono-stretch',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
 
-                    # mono mode (hidden if RGB)
-                    with Vertical(id='plot-mono-container', classes='hidden' if is_rgb else ''):
-                        yield Static('Monochromatic Plotting Options', classes='section-title')
-                        # Single Band Selector (All known bands)
-                        all_band_opts = [(b.display, b.name) for b in BANDS]
-                        with Horizontal(classes='field-row'):
-                            yield Label('Band:', classes='field-label')
-                            yield Select(
-                                all_band_opts,
-                                value=plot_bands[0] if plot_bands else Select.BLANK,
-                                id='plot-mono-band',
-                                classes='field-input',
+                    # Q
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Q')
+                            yield InfoIcon('Softening parameter for asinh (higher = more linear)')
+                            yield Label(':')
+                        yield Input(
+                            value=str(mono.get('Q', 7.0)),
+                            id='mono-q',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
+
+                    # Gamma
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Gamma')
+                            yield InfoIcon('Gamma correction (lower = enhances faint features)')
+                            yield Label(':')
+                        yield Input(
+                            value=str(mono.get('gamma', 0.25)),
+                            id='mono-gamma',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
+
+                # RGB mode (hidden if mono)
+                with Vertical(id='plot-rgb-container', classes='' if is_rgb else 'hidden'):
+                    yield Static('RGB Plotting Options', classes='section-title')
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('RGB Bands')
+                            yield InfoIcon(
+                                'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
                             )
+                            yield Label(':')
 
+                        # New Widget Integration
+                        yield RGBBandSelector(
+                            selected_bands=plot_bands,
+                            id='rgb-band-selector',
+                        )
+
+                    # Display Mode is only relevant for RGB
+                    mode = plotting.get('mode', 'grid')
+                    modes = [('Grid', 'grid'), ('Channel', 'channel')]
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Display Mode')
+                            yield InfoIcon('Grid: thumbnails; Channel: show R,G,B separately')
+                            yield Label(':')
+                        yield Select(
+                            modes,
+                            value=mode,
+                            id='plot-mode',
+                            classes='field-input',
+                        )
+
+                    with Vertical(
+                        id='rgb-max-columns-container',
+                        classes='' if mode != 'channel' else 'hidden',
+                    ):
                         # Max columns in the cutout grid
                         with Horizontal(classes='field-row'):
                             with Horizontal(classes='field-label'):
@@ -948,179 +1050,72 @@ class ConfigEditorApp(App[None]):
                                 validators=[IntegerRange(1, 100)],
                             )
 
-                        # Scaling
-                        scaling_type = mono.get('scaling_type', 'asinh')
-                        scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Scaling Type')
-                                yield InfoIcon('asinh preserves both bright and faint details')
-                                yield Label(':')
-                            yield Select(
-                                scaling_types,
-                                value=scaling_type,
-                                id='mono-scaling-type',
-                                classes='field-input',
-                            )
+                    # RGB Specific Scaling
+                    scaling_type = rgb.get('scaling_type', 'asinh')
+                    scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Scaling Type')
+                            yield InfoIcon('asinh preserves both bright and faint details')
+                            yield Label(':')
+                        yield Select(
+                            scaling_types,
+                            value=scaling_type,
+                            id='rgb-scaling-type',
+                            classes='field-input',
+                        )
 
-                        # Stretch
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Stretch')
-                                yield InfoIcon('Scaling factor controlling overall brightness')
-                                yield Label(':')
-                            yield Input(
-                                value=str(mono.get('stretch', 125.0)),
-                                id='mono-stretch',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
+                    # Stretch
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Stretch')
+                            yield InfoIcon('Scaling factor controlling overall brightness')
+                            yield Label(':')
+                        yield Input(
+                            value=str(rgb.get('stretch', 125.0)),
+                            id='rgb-stretch',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
 
-                        # Q
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Q')
-                                yield InfoIcon(
-                                    'Softening parameter for asinh (higher = more linear)'
-                                )
-                                yield Label(':')
-                            yield Input(
-                                value=str(mono.get('Q', 7.0)),
-                                id='mono-q',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
+                    # Q
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Q')
+                            yield InfoIcon('Softening parameter for asinh (higher = more linear)')
+                            yield Label(':')
+                        yield Input(
+                            value=str(rgb.get('Q', 7.0)),
+                            id='rgb-q',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
 
-                        # Gamma
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Gamma')
-                                yield InfoIcon('Gamma correction (lower = enhances faint features)')
-                                yield Label(':')
-                            yield Input(
-                                value=str(mono.get('gamma', 0.25)),
-                                id='mono-gamma',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
+                    # Gamma
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Gamma')
+                            yield InfoIcon('Gamma correction (lower = enhances faint features)')
+                            yield Label(':')
+                        yield Input(
+                            value=str(rgb.get('gamma', 0.25)),
+                            id='rgb-gamma',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
 
-                    # RGB mode (hidden if mono)
-                    with Vertical(id='plot-rgb-container', classes='' if is_rgb else 'hidden'):
-                        yield Static('RGB Plotting Options', classes='section-title')
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('RGB Bands')
-                                yield InfoIcon(
-                                    'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
-                                )
-                                yield Label(':')
-
-                            # New Widget Integration
-                            yield RGBBandSelector(
-                                selected_bands=plot_bands,
-                                id='rgb-band-selector',
-                            )
-
-                        # Display Mode is only relevant for RGB
-                        mode = plotting.get('mode', 'grid')
-                        modes = [('Grid', 'grid'), ('Channel', 'channel')]
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Display Mode')
-                                yield InfoIcon('Grid: thumbnails; Channel: show R,G,B separately')
-                                yield Label(':')
-                            yield Select(
-                                modes,
-                                value=mode,
-                                id='plot-mode',
-                                classes='field-input',
-                            )
-
-                        with Vertical(
-                            id='rgb-max-columns-container',
-                            classes='' if mode != 'channel' else 'hidden',
-                        ):
-                            # Max columns in the cutout grid
-                            with Horizontal(classes='field-row'):
-                                with Horizontal(classes='field-label'):
-                                    yield Label('Max Columns')
-                                    yield InfoIcon('Maximum columns in the cutout grid')
-                                    yield Label(':')
-                                yield Input(
-                                    value=str(plotting.get('max_cols', 5)),
-                                    id='plot-max-cols',
-                                    classes='field-input',
-                                    validators=[IntegerRange(1, 100)],
-                                )
-
-                        # RGB Specific Scaling
-                        scaling_type = rgb.get('scaling_type', 'asinh')
-                        scaling_types = [('Asinh', 'asinh'), ('Linear', 'linear')]
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Scaling Type')
-                                yield InfoIcon('asinh preserves both bright and faint details')
-                                yield Label(':')
-                            yield Select(
-                                scaling_types,
-                                value=scaling_type,
-                                id='rgb-scaling-type',
-                                classes='field-input',
-                            )
-
-                        # Stretch
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Stretch')
-                                yield InfoIcon('Scaling factor controlling overall brightness')
-                                yield Label(':')
-                            yield Input(
-                                value=str(rgb.get('stretch', 125.0)),
-                                id='rgb-stretch',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
-
-                        # Q
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Q')
-                                yield InfoIcon(
-                                    'Softening parameter for asinh (higher = more linear)'
-                                )
-                                yield Label(':')
-                            yield Input(
-                                value=str(rgb.get('Q', 7.0)),
-                                id='rgb-q',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
-
-                        # Gamma
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Gamma')
-                                yield InfoIcon('Gamma correction (lower = enhances faint features)')
-                                yield Label(':')
-                            yield Input(
-                                value=str(rgb.get('gamma', 0.25)),
-                                id='rgb-gamma',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
-
-                        # Standard ZP
-                        with Horizontal(classes='field-row'):
-                            with Horizontal(classes='field-label'):
-                                yield Label('Standard ZP')
-                                yield InfoIcon('Standard zero-point for flux normalization')
-                                yield Label(':')
-                            yield Input(
-                                value=str(rgb.get('standard_zp', 30.0)),
-                                id='rgb-standard-zp',
-                                classes='field-input',
-                                validators=[FloatValidator()],
-                            )
+                    # Standard ZP
+                    with Horizontal(classes='field-row'):
+                        with Horizontal(classes='field-label'):
+                            yield Label('Standard ZP')
+                            yield InfoIcon('Standard zero-point for flux normalization')
+                            yield Label(':')
+                        yield Input(
+                            value=str(rgb.get('standard_zp', 30.0)),
+                            id='rgb-standard-zp',
+                            classes='field-input',
+                            validators=[FloatValidator()],
+                        )
 
     def _compose_inputs_tab(self) -> ComposeResult:
         """Compose the Inputs settings tab."""
