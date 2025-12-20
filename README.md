@@ -183,7 +183,7 @@ unionsdata download --coordinates 227.3042 52.5285 231.4445 52.4447
 Download tiles for objects in a CSV file:
 
 ```bash
-unionsdata download --dataframe /path/to/catalog.csv
+unionsdata download --table /path/to/catalog.csv
 ```
 
 Your CSV should have columns for RA, Dec, and object ID. Example:
@@ -225,7 +225,7 @@ runtime:
   max_retries: 5
 
 inputs:
-  source: "tiles"  # Options: tiles, coordinates, dataframe, all_available
+  source: "tiles"  # Options: tiles, coordinates, table, all_available
   tiles:
     - [217, 292]
     - [234, 295]
@@ -233,7 +233,7 @@ inputs:
   coordinates:
     - [227.3042, 52.5285]
 
-  dataframe:
+  table:
     path: "/path/to/catalog.csv"
     columns:
       ra: "ra"
@@ -295,8 +295,8 @@ data/
 | `tiles` | `update_tiles` | Refresh tile lists from VOSpace |
 | `tiles` | `band_constraint` | Minimum bands required per tile |
 | `tiles` | `require_all_specified_bands` | Require that all requested bands are available to download a tile |
-| `cutouts` | `enable` | Create cutouts around input coordinates. Works if input is `coordinates` or `dataframe` |
-| `inputs` | `source` | Input method: `tiles`, `coordinates`, `dataframe`, or `all_available` |
+| `cutouts` | `enable` | Create cutouts around input coordinates. Works if input is `coordinates` or `table` |
+| `inputs` | `source` | Input method: `tiles`, `coordinates`, `table`, or `all_available` |
 
 ### Band Configuration
 

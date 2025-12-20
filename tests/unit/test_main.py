@@ -51,7 +51,7 @@ def test_build_cli_overrides_tiles():
         bands=['whigs-g', 'cfis_lsb-r'],
         update_tiles=False,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
     )
 
@@ -64,12 +64,12 @@ def test_build_cli_overrides_tiles():
     assert 'update_tiles' not in overrides  # False, so not included
 
 
-def test_build_cli_overrides_dataframe():
-    """Test that dataframe path is correctly added to overrides."""
+def test_build_cli_overrides_table():
+    """Test that table path is correctly added to overrides."""
 
     # ARRANGE
     args = argparse.Namespace(
-        dataframe='/path/to/catalog.csv',
+        table='/path/to/catalog.csv',
         bands=['ps-i'],
         update_tiles=False,
         tiles=None,
@@ -81,7 +81,7 @@ def test_build_cli_overrides_dataframe():
     overrides = build_cli_overrides(args)
 
     # ASSERT
-    assert overrides['dataframe'] == '/path/to/catalog.csv'
+    assert overrides['table'] == '/path/to/catalog.csv'
     assert overrides['bands'] == ['ps-i']
 
 
@@ -94,7 +94,7 @@ def test_build_cli_overrides_odd_number_tiles_raises_error():
         bands=None,
         update_tiles=False,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
     )
 
@@ -114,7 +114,7 @@ def test_build_cli_overrides_odd_number_coordinates_raises_error():
         bands=None,
         update_tiles=False,
         tiles=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
     )
 
@@ -130,7 +130,7 @@ def test_build_cli_overrides_empty_args():
     args = argparse.Namespace(
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -151,7 +151,7 @@ def test_build_cli_overrides_no_input_source():
         bands=['whigs-g'],
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         update_tiles=False,
     )
@@ -163,6 +163,6 @@ def test_build_cli_overrides_no_input_source():
     assert overrides == {'bands': ['whigs-g']}
     assert 'tiles' not in overrides
     assert 'coordinates' not in overrides
-    assert 'dataframe' not in overrides
+    assert 'table' not in overrides
     assert 'all_tiles' not in overrides
     assert 'update_tiles' not in overrides

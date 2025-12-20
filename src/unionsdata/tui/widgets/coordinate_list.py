@@ -6,6 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.reactive import reactive
+from textual.validation import Validator
 from textual.widgets import Button, Input, Label, Static
 
 from unionsdata.tui.validators import FloatValidator, IntegerRange
@@ -95,23 +96,30 @@ class CoordinateRow(Static):
         self._coord_type = coord_type
 
     def compose(self) -> ComposeResult:
-        validator = (
-            IntegerRange(minimum=0, maximum=999) if self._coord_type == 'int' else FloatValidator()
-        )
+        # Define validators
+        val1: Validator
+        val2: Validator
+        if self._coord_type == 'int':
+            # Tile coordinates (0-999)
+            val1 = val2 = IntegerRange(minimum=0, maximum=999)
+        else:
+            # Sky coordinates: RA (0-360) and Dec (-90 to +90)
+            val1 = FloatValidator(minimum=0.0, maximum=360.0)
+            val2 = FloatValidator(minimum=-90.0, maximum=90.0)
 
         with Horizontal():
             yield Static(f'{self._index + 1}.', classes='row-index')
             yield Input(
                 value=self._value1,
                 placeholder=self._label1,
-                validators=[validator],
+                validators=[val1],
                 classes='coord-input',
                 id=f'{self.id}-input1' if self.id else None,
             )
             yield Input(
                 value=self._value2,
                 placeholder=self._label2,
-                validators=[validator],
+                validators=[val2],
                 classes='coord-input',
                 id=f'{self.id}-input2' if self.id else None,
             )

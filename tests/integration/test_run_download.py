@@ -146,7 +146,7 @@ inputs:
     - [217, 292]
     - [234, 295]
   coordinates: []
-  dataframe:
+  table:
     path: ""
     columns:
       ra: "ra"
@@ -310,7 +310,7 @@ def setup_table_dir(tmp_path: Path, test_config: Path) -> Path:
 
 
 @pytest.fixture
-def test_dataframe(tmp_path: Path) -> Path:
+def test_table(tmp_path: Path) -> Path:
     """Create a test CSV file with coordinates."""
     csv_path = tmp_path / 'test_coords.csv'
 
@@ -345,7 +345,7 @@ def test_run_download_integration_basic(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -398,7 +398,7 @@ def test_run_download_integration_cli_override_bands(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=['whigs-g'],
         update_tiles=False,
@@ -431,7 +431,7 @@ def test_run_download_integration_cli_override_tiles(
         config=test_config,
         tiles=[217, 292],
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -466,7 +466,7 @@ def test_run_download_integration_coordinates(
         config=test_config,
         tiles=None,
         coordinates=[ra, dec],
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -512,7 +512,7 @@ def test_run_download_integration_no_tiles_to_download(
         config=test_config,
         tiles=[999, 999],
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -574,7 +574,7 @@ def test_run_download_integration_resume_mode(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -616,7 +616,7 @@ def test_run_download_integration_band_constraint(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -657,7 +657,7 @@ def test_run_download_integration_error_handling(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=['whigs-g'],
         update_tiles=False,
@@ -693,7 +693,7 @@ def test_run_download_integration_timing(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=None,
         update_tiles=False,
@@ -739,7 +739,7 @@ def test_run_download_integration_decompression_failure_retry(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=None,
+        table=None,
         all_tiles=False,
         bands=['whigs-g'],  # Compressed band
         update_tiles=False,
@@ -759,11 +759,11 @@ def test_run_download_integration_decompression_failure_retry(
     assert decompress_call_count == 4
 
 
-def test_run_download_integration_dataframe_with_cutouts(
+def test_run_download_integration_table_with_cutouts(
     test_config: Path,
     setup_tile_info: None,
     setup_table_dir: Path,
-    test_dataframe: Path,
+    test_table: Path,
     mock_vcp: MagicMock,
     mock_setup_logger: MagicMock,
     mock_config_loading: None,
@@ -774,13 +774,13 @@ def test_run_download_integration_dataframe_with_cutouts(
     mock_cutout_creation: MagicMock,
     caplog: LogCaptureFixture,
 ) -> None:
-    """Test run_download with dataframe input and cutout creation."""
+    """Test run_download with table input and cutout creation."""
 
     args = argparse.Namespace(
         config=test_config,
         tiles=None,
         coordinates=None,
-        dataframe=str(test_dataframe),
+        table=str(test_table),
         all_tiles=False,
         bands=None,
         update_tiles=False,

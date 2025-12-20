@@ -196,7 +196,7 @@ Toast {
     border: dashed $secondary;
 }
 
-/* Column mappings for dataframe */
+/* Column mappings for table */
 .column-mappings {
     margin-top: 1;
 }

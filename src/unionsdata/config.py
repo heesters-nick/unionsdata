@@ -100,7 +100,7 @@ class PlottingCfg(BaseModel):
 
 
 class ColumnMap(BaseModel):
-    """Column name mappings for dataframes."""
+    """Column name mappings for tables."""
 
     model_config = ConfigDict(extra='forbid')
     ra: str = 'ra'
@@ -108,8 +108,8 @@ class ColumnMap(BaseModel):
     id: str = 'ID'
 
 
-class InputsDataFrame(BaseModel):
-    """Dataframe input configuration."""
+class InputsTable(BaseModel):
+    """Table input configuration."""
 
     model_config = ConfigDict(extra='forbid')
     path: Path = Path('')
@@ -120,10 +120,10 @@ class InputsCfg(BaseModel):
     """Input source configuration."""
 
     model_config = ConfigDict(extra='forbid')
-    source: Literal['all_available', 'tiles', 'coordinates', 'dataframe'] = 'tiles'
+    source: Literal['all_available', 'tiles', 'coordinates', 'table'] = 'tiles'
     tiles: list[tuple[int, int]] = Field(default_factory=list)
     coordinates: list[tuple[float, float]] = Field(default_factory=list)
-    dataframe: InputsDataFrame = Field(default_factory=InputsDataFrame)
+    table: InputsTable = Field(default_factory=InputsTable)
 
 
 class PathsDatabase(BaseModel):
@@ -260,9 +260,9 @@ class Settings(BaseModel):
             )
 
         # Validate input source specific requirements
-        if self.inputs.source == 'dataframe':
-            if not self.inputs.dataframe.path:
-                raise ValueError('inputs.dataframe.path must be set when source is "dataframe"')
+        if self.inputs.source == 'table':
+            if not self.inputs.table.path:
+                raise ValueError('inputs.table.path must be set when source is "table"')
 
         if self.inputs.source == 'tiles':
             if not self.inputs.tiles:
@@ -272,10 +272,7 @@ class Settings(BaseModel):
             if not self.inputs.coordinates:
                 logger.warning('inputs.source is "coordinates" but no coordinates specified')
 
-        if (
-            self.inputs.source not in ['coordinates', 'dataframe']
-            and self.cutouts.mode != 'disabled'
-        ):
+        if self.inputs.source not in ['coordinates', 'table'] and self.cutouts.mode != 'disabled':
             logger.warning(
                 'Cutout creation is enabled but no object coordinates were supplied. No cutouts will be created.'
             )
@@ -427,12 +424,10 @@ def _apply_cli_overrides(yaml_data: dict[str, Any], overrides: dict[str, Any]) -
             f'CLI override: inputs.coordinates = {overrides["coordinates"]}, source = coordinates'
         )
 
-    if 'dataframe' in overrides and overrides['dataframe'] is not None:
-        yaml_data['inputs']['dataframe']['path'] = overrides['dataframe']
-        yaml_data['inputs']['source'] = 'dataframe'
-        logger.debug(
-            f'CLI override: inputs.dataframe.path = {overrides["dataframe"]}, source = dataframe'
-        )
+    if 'table' in overrides and overrides['table'] is not None:
+        yaml_data['inputs']['table']['path'] = overrides['table']
+        yaml_data['inputs']['source'] = 'table'
+        logger.debug(f'CLI override: inputs.table.path = {overrides["table"]}, source = table')
 
     if 'all_tiles' in overrides and overrides['all_tiles']:
         yaml_data['inputs']['source'] = 'all_available'

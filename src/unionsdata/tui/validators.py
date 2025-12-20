@@ -41,9 +41,10 @@ class IntegerRange(Validator):
 class FloatValidator(Validator):
     """Validate that input is a valid float."""
 
-    def __init__(self, allow_negative: bool = True) -> None:
+    def __init__(self, minimum: float | None = None, maximum: float | None = None) -> None:
         super().__init__()
-        self.allow_negative = allow_negative
+        self.minimum = minimum
+        self.maximum = maximum
 
     def validate(self, value: str) -> ValidationResult:
         if not value.strip():
@@ -54,8 +55,11 @@ class FloatValidator(Validator):
         except ValueError:
             return self.failure('Must be a number')
 
-        if not self.allow_negative and float_value < 0:
-            return self.failure('Must be non-negative')
+        if self.minimum is not None and float_value < self.minimum:
+            return self.failure(f'Must be at least {self.minimum}')
+
+        if self.maximum is not None and float_value > self.maximum:
+            return self.failure(f'Must be at most {self.maximum}')
 
         return self.success()
 

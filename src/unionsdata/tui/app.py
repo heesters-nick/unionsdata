@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 # Type alias for input sources
-InputSource = Literal['all_available', 'tiles', 'coordinates', 'dataframe']
+InputSource = Literal['all_available', 'tiles', 'coordinates', 'table']
 ButtonVariant = Literal['default', 'primary', 'success', 'warning', 'error']
 
 
@@ -537,7 +537,7 @@ class ConfigEditorApp(App[None]):
                 'source': 'tiles',
                 'tiles': [],
                 'coordinates': [],
-                'dataframe': {'path': '', 'columns': {'ra': 'ra', 'dec': 'dec', 'id': 'ID'}},
+                'table': {'path': '', 'columns': {'ra': 'ra', 'dec': 'dec', 'id': 'ID'}},
             },
             'paths_database': {'tile_info_dirname': 'tile_info', 'logs_dirname': 'logs'},
             'paths_by_machine': {
@@ -1134,7 +1134,7 @@ class ConfigEditorApp(App[None]):
                 ('All Available Tiles', 'all_available'),
                 ('Specific Tiles', 'tiles'),
                 ('Sky Coordinates', 'coordinates'),
-                ('DataFrame (CSV)', 'dataframe'),
+                ('Table (CSV)', 'table'),
             ]
             current_source = inputs.get('source', 'tiles')
 
@@ -1173,13 +1173,13 @@ class ConfigEditorApp(App[None]):
                     id='coordinates-list',
                 )
 
-            # DataFrame input section
-            df_config = inputs.get('dataframe', {})
+            # table input section
+            df_config = inputs.get('table', {})
             with Vertical(
-                id='dataframe-input-section',
-                classes='' if current_source == 'dataframe' else 'hidden',
+                id='table-input-section',
+                classes='' if current_source == 'table' else 'hidden',
             ):
-                yield Static('DataFrame Configuration', classes='subsection-title')
+                yield Static('Table Configuration', classes='subsection-title')
 
                 with Horizontal(classes='field-row'):
                     yield Label('CSV Path:', classes='field-label')
@@ -1187,7 +1187,7 @@ class ConfigEditorApp(App[None]):
                         value=str(df_config.get('path', '')),
                         must_exist=True,
                         must_be_file=True,
-                        id='dataframe-path',
+                        id='table-path',
                     )
 
                 yield Static('Column Mappings', classes='subsection-title')
@@ -1569,7 +1569,7 @@ Tips:
         sections = {
             'tiles': '#tiles-input-section',
             'coordinates': '#coordinates-input-section',
-            'dataframe': '#dataframe-input-section',
+            'table': '#table-input-section',
         }
 
         for src, selector in sections.items():
@@ -1760,12 +1760,12 @@ Tips:
                 list(c)
                 for c in self.query_one('#coordinates-list', CoordinateList).get_coordinates()
             ],
-            'dataframe': {
-                'path': self.query_one('#dataframe-path', PathInput).value,
+            'table': {
+                'path': self.query_one('#table-path', PathInput).value,
                 'columns': {
-                    'ra': self._get_input_value('#df-col-ra', 'ra'),
-                    'dec': self._get_input_value('#df-col-dec', 'dec'),
-                    'id': self._get_input_value('#df-col-id', 'ID'),
+                    'ra': self._get_input_value('#table-col-ra', 'ra'),
+                    'dec': self._get_input_value('#table-col-dec', 'dec'),
+                    'id': self._get_input_value('#table-col-id', 'ID'),
                 },
             },
         }
@@ -1962,12 +1962,12 @@ Tips:
                 errors.append(
                     'At least one coordinate pair is required when source is "Sky Coordinates"'
                 )
-        if source == 'dataframe':
-            df_path = self.query_one('#dataframe-path', PathInput)
+        if source == 'table':
+            df_path = self.query_one('#table-path', PathInput)
             if not df_path.value.strip():
-                errors.append('DataFrame path is required when source is "dataframe"')
+                errors.append('Table path is required when source is "Table"')
             elif not df_path.is_valid():
-                errors.append('DataFrame file does not exist')
+                errors.append('Table file does not exist')
 
         if errors:
             return errors

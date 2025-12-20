@@ -70,7 +70,7 @@ inputs:
   coordinates:
     - [227.3042, 52.5285]
     - [231.4445, 52.4447]
-  dataframe:
+  table:
     path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"
     columns:
       ra: "ra"
@@ -194,7 +194,7 @@ def test_load_settings_cli_override(tmp_path: Path, test_config: Path) -> None:
     # CLI overrides
     overrides = {
         'bands': ['ps-i', 'wishes-z'],
-        'input_source': 'dataframe',
+        'input_source': 'table',
         'coordinates': [(11.1111, 22.2222), (33.3333, 44.4444)],
         'update_tiles': True,
     }
@@ -206,7 +206,7 @@ def test_load_settings_cli_override(tmp_path: Path, test_config: Path) -> None:
     # Check that the override took effect
     assert settings.runtime.bands == ['ps-i', 'wishes-z']
     # Since we simulated passing coordinates on the CLI the input type
-    # should be changed to 'coordinate' and override the previously set 'dataframe'
+    # should be changed to 'coordinate' and override the previously set 'table'
     assert settings.inputs.source == 'coordinates'
     assert settings.inputs.coordinates == [(11.1111, 22.2222), (33.3333, 44.4444)]
     assert settings.tiles.update_tiles is True

@@ -82,8 +82,8 @@ def build_cli_overrides(args: argparse.Namespace) -> dict[str, object]:
             [args.coordinates[i], args.coordinates[i + 1]]
             for i in range(0, len(args.coordinates), 2)
         ]
-    elif hasattr(args, 'dataframe') and args.dataframe:
-        overrides['dataframe'] = args.dataframe
+    elif hasattr(args, 'table') and args.table:
+        overrides['table'] = args.table
     elif hasattr(args, 'all_tiles') and args.all_tiles:
         overrides['all_tiles'] = True
 
@@ -243,7 +243,7 @@ def run_download(args: argparse.Namespace) -> None:
     if (
         not catalog.empty
         and cfg.cutouts.mode != 'disabled'
-        and cfg.inputs.source in ['coordinates', 'dataframe']
+        and cfg.inputs.source in ['coordinates', 'table']
     ):
         successful_tiles = set(tile_cutout_info.keys())
 
@@ -251,8 +251,8 @@ def run_download(args: argparse.Namespace) -> None:
         catalog['cutout_created'] = catalog['tile'].isin(successful_tiles).astype(int)
 
         # Save augmented catalog
-        if cfg.inputs.source == 'dataframe':
-            input_name = cfg.inputs.dataframe.path.stem
+        if cfg.inputs.source == 'table':
+            input_name = cfg.inputs.table.path.stem
         else:
             input_name = 'input_coordinates'
         catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
@@ -387,7 +387,7 @@ def run_config(args: argparse.Namespace) -> None:
 
 
 def run_plot(args: argparse.Namespace) -> None:
-    """Plot RGB object cutouts from input dataframe or coordinates.
+    """Plot RGB object cutouts from input table or coordinates.
     Uses configuration from config.yaml plotting section."""
 
     plot_start = time.time()
@@ -445,7 +445,7 @@ def run_plot(args: argparse.Namespace) -> None:
         if catalog_path is None:
             logger.error('No augmented catalogs found in tables directory.')
             logger.info(
-                "Run 'unionsdata download' with coordinates or a dataframe first "
+                "Run 'unionsdata download' with coordinates or a table first "
                 'to create cutouts and augmented catalogs.'
             )
             sys.exit(1)
@@ -563,7 +563,7 @@ def cli_entry() -> None:
 
     parser_plot = subparsers.add_parser(
         'plot',
-        help='Plot RGB object cutouts from input dataframe or coordinates',
+        help='Plot RGB object cutouts from input table or coordinates',
     )
     parser_plot.set_defaults(func=run_plot)
 
@@ -576,7 +576,7 @@ def cli_entry() -> None:
         help='List of RA/Dec coordinate pairs: --coordinates ra1 dec1 ra2 dec2 ...',
     )
     input_group.add_argument(
-        '--dataframe',
+        '--table',
         type=str,
         help='Path to CSV file containing coordinates',
     )

@@ -59,7 +59,7 @@ plotting:
 
 inputs:
   # Choose the input source
-  source: "dataframe"                                              # all_available | tiles | coordinates | dataframe
+  source: "table"                                              # all_available | tiles | coordinates | table
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]
@@ -71,7 +71,7 @@ inputs:
     - [227.3042, 52.5285]
     - [231.4445, 52.4447]
 
-  dataframe:
+  table:
     path: "/home/nick/astro/unionsdata/tables/M81_selection.csv"  # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name

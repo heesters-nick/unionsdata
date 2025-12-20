@@ -418,7 +418,7 @@ def import_coordinates(
         ValueError: error if the number of coordinates is not even
 
     Returns:
-        tuple: dataframe, SkyCoord object of the coordinates
+        tuple: DataFrame, SkyCoord object of the coordinates
     """
     catalog = pd.DataFrame(coordinates, columns=[ra_key, dec_key], dtype=np.float32)
     # assign IDs to the coordinates
@@ -433,26 +433,26 @@ def import_coordinates(
     return catalog, coord_c
 
 
-def import_dataframe(
-    dataframe_path: Path,
+def import_table(
+    table_path: Path,
     ra_key: str,
     dec_key: str,
     id_key: str,
 ) -> tuple[pd.DataFrame, SkyCoord | None]:
     """
-    Process a DataFrame provided in the config file.
+    Process a table provided in the config file.
 
     Args:
-        dataframe_path: path to the DataFrame
+        table_path: path to the table
         ra_key: right ascention key
         dec_key: declination key
         id_key: ID key
 
     Returns:
-        tuple: dataframe, SkyCoord object of the coordinates
+        tuple: DataFrame, SkyCoord object of the coordinates
     """
-    logger.info('Dataframe read from config file.')
-    catalog = pd.read_csv(dataframe_path)
+    logger.info('Table read from config file.')
+    catalog = pd.read_csv(table_path)
 
     # Add ID column if not present
     if id_key not in catalog.columns:
@@ -460,7 +460,7 @@ def import_dataframe(
 
     if ra_key not in catalog.columns or dec_key not in catalog.columns:
         logger.error(
-            'One or more keys not found in the DataFrame. Please provide the correct keys '
+            'One or more keys not found in the table. Please provide the correct keys '
             'for right ascention and declination \n'
             'if they are not equal to the default keys: ra, dec.'
         )
@@ -515,7 +515,7 @@ def input_to_tile_list(
         availability: instance of the TileAvailability class
         all_unique_tiles: list of all unique tiles available
         band_constr: minimum number of bands that should be available
-        inputs: input dictionary with coordinates, a dataframe, or tiles
+        inputs: input dictionary with coordinates, a table, or tiles
         tile_info_dir: path to tile information.
         ra_key_default: default right ascention key. Defaults to 'ra'.
         dec_key_default: default declination key. Defaults to 'dec'.
@@ -533,15 +533,15 @@ def input_to_tile_list(
         if coord_c is None:
             logger.error('Failed to load coordinates.')
             return None, None, pd.DataFrame()
-    elif source == 'dataframe':
-        catalog, coord_c = import_dataframe(
-            inputs.dataframe.path,
-            inputs.dataframe.columns.ra,
-            inputs.dataframe.columns.dec,
-            inputs.dataframe.columns.id,
+    elif source == 'table':
+        catalog, coord_c = import_table(
+            inputs.table.path,
+            inputs.table.columns.ra,
+            inputs.table.columns.dec,
+            inputs.table.columns.id,
         )
         if coord_c is None:
-            logger.error('Failed to load coordinates from dataframe')
+            logger.error('Failed to load coordinates from table')
             return None, None, pd.DataFrame()
     elif source == 'tiles':
         return (
@@ -550,7 +550,7 @@ def input_to_tile_list(
             pd.DataFrame(),
         )
     else:
-        logger.info('No coordinates, DataFrame or tiles provided. Processing all available tiles..')
+        logger.info('No coordinates, table or tiles provided. Processing all available tiles..')
         return None, None, pd.DataFrame()
 
     unique_tiles, tiles_x_bands, catalog = tile_finder(
