@@ -1014,7 +1014,7 @@ class ConfigEditorApp(App[None]):
                         with Horizontal(classes='field-label'):
                             yield Label('RGB Bands')
                             yield InfoIcon(
-                                'Select bands for RGB channels, or leave unset to use first 3 runtime bands. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
+                                'Select bands for RGB channels. Wavelength order must be followed (Blue < Green < Red). Hit the reset button to clear selections and start over.'
                             )
                             yield Label(':')
 

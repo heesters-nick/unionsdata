@@ -15,7 +15,7 @@ A Python package for downloading multi-band imaging data from the Ultraviolet Ne
 🌳 **Spatial indexing** - KD-tree for efficient coordinate-to-tile matching\
 📊 **Progress tracking** - Real-time download status and completion reports\
 ⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
-✂️ **Cutout creation** - Create and plot RGB cutouts around objects of interest\
+✂️ **Cutout creation** - Create and plot grayscale or RGB cutouts around objects of interest\
 🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup
 
 ## Quick Start
@@ -24,12 +24,9 @@ A Python package for downloading multi-band imaging data from the Ultraviolet Ne
 # Install
 pip install unionsdata
 
-# Setup (opens config in editor)
-unionsdata init
+# Setup
+unionsdata init    # Create your local copy of the config
 unionsdata config  # Configure your download
-
-# Get credentials (valid 10 days)
-cadc-get-cert -u YOUR_CANFAR_USERNAME
 
 # Download tiles
 unionsdata download --tiles 217 292 --bands whigs-g cfis_lsb-r ps-i
@@ -75,25 +72,16 @@ This creates your configuration file at:
 unionsdata config
 ```
 
-This opens a terminal user interface. Update the paths and other parameters:
+This opens a terminal user interface (TUI). Set your paths, inputs and other parameters:
 
-```yaml
-machine: local
+![TUI Paths](tui_images/tui_paths.png)
 
-paths_by_machine:
-  local:
-    root_dir_main: "/path/to/your/project"
-    # **Important**: define location for downloaded data
-    root_dir_data: "/path/to/download/data"
-```
-
-**Step 4:** Set up CANFAR credentials
-
-> 🔑 **Important:** Credentials expire after 10 days. Re-run this command when needed.
+> 🔑 **Important:** Set up your CADC certificate in the TUI by clicking the Create/Renew button in the Paths tab and providing your CADC username and password. Credentials expire after 10 days. The button will indicate if a certificate is about to expire or already has. You can also manually create or renew your certificate in the terminal via:
 
 ```bash
 cadc-get-cert -u YOUR_CANFAR_USERNAME
 ```
+
 
 ### Option 2: Install from Source (For Development)
 
@@ -154,7 +142,7 @@ The package provides a `unionsdata` command with several subcommands:
 > unionsdata download --update-tiles
 > ```
 >
-> Or set `update_tiles: true` in your config file.
+> Or tick the `Update Tiles` option in the TUI.
 
 #### Download Specific Tiles
 
@@ -204,42 +192,15 @@ M101,210.8022,54.3489
 unionsdata download --all-tiles --bands whigs-g cfis_lsb-r
 ```
 
-### Using Configuration File
+### Using the Terminal User Interface (TUI)
 
-Instead of command-line arguments, you can configure downloads in your config file.
+Instead of using command-line arguments, you can configure downloads in the terminal user interface via
 
-Example configuration:
-
-```yaml
-machine: local
-
-logging:
-  name: download_test
-  level: INFO
-
-runtime:
-  n_download_threads: 12
-  n_cutout_processes: 2
-  bands: ["whigs-g", "cfis_lsb-r", "ps-i"]
-  resume: false
-  max_retries: 5
-
-inputs:
-  source: "tiles"  # Options: tiles, coordinates, table, all_available
-  tiles:
-    - [217, 292]
-    - [234, 295]
-
-  coordinates:
-    - [227.3042, 52.5285]
-
-  table:
-    path: "/path/to/catalog.csv"
-    columns:
-      ra: "ra"
-      dec: "dec"
-      id: "ID"
+```bash
+unionsdata config
 ```
+
+A clickable user interface will open in your terminal where you can specify options for your download, cutout creation and subsequent cutout plotting. The configuration is grouped into several tabs: General, Paths, Inputs, Runtime, Bands, Tiles, Cutouts, and Plotting. The input fields are validated in real time: all drop down menus need to have a selection before allowing you to save the config file. Text boxes have a green border if the entry is valid and a red one if it is invalid. The info icons **(𝑖)** next to the settings in the TUI provide additional information. Choose either specific sky coordinates or a table of objects as an input and enable cutout creation if you want to plot your input objects after the data is downloaded. The application will augment your input table (or create a table from your input coordinates) and save it to the `Tables` directory. In the `Plotting` tab you can specify the catalog from which objects should be plotted under `Catalog Name`. The setting `Auto` automatically uses the most recent input. Once you have completed the configuration, hit the `Save & Quit` button.
 
 Then run:
 
@@ -251,6 +212,12 @@ Or simply:
 
 ```bash
 unionsdata
+```
+
+If you have opted to create cutouts, you can plot them using:
+
+```bash
+unionsdata plot
 ```
 
 ## Supported Bands
@@ -276,8 +243,10 @@ data/
 │   │   └── calexp-CFIS_217_292.fits
 │   ├── cfis_lsb-r/
 │   │   └── CFIS_LSB.217.292.r.fits
-│   └── ps-i/
-│       └── PSS.DR4.217.292.i.fits
+│   ├── ps-i/
+│   │   └── PSS.DR4.217.292.i.fits
+│   └── cutouts/
+│       └── 217_292_cutouts_512.h5
 └── 234_295/
     └── ...
 ```
@@ -288,15 +257,17 @@ data/
 
 | Section | Option | Description |
 |---------|--------|-------------|
-| `runtime` | `n_download_threads` | Number of parallel download threads (1-32) |
-| `runtime` | `n_cutout_processes` | Number of parallel cutout processes (1-32) |
-| `runtime` | `bands` | List of bands to download |
-| `runtime` | `resume` | Overwrite existing log file if `false` |
-| `tiles` | `update_tiles` | Refresh tile lists from VOSpace |
-| `tiles` | `band_constraint` | Minimum bands required per tile |
-| `tiles` | `require_all_specified_bands` | Require that all requested bands are available to download a tile |
-| `cutouts` | `enable` | Create cutouts around input coordinates. Works if input is `coordinates` or `table` |
-| `inputs` | `source` | Input method: `tiles`, `coordinates`, `table`, or `all_available` |
+| `Inputs` | `Input Source` | Input method: `Specific Tiles`, `Sky Coordinates`, `Table (CSV)`, or `All Available Tiles` |
+| `Runtime` | `Download Threads` | Number of parallel download threads (1-32) |
+| `Runtime` | `Cutout Processes` | Number of parallel cutout processes (1-32) |
+| `Bands` | `Band Selection` | List of bands to download |
+| `Tiles` | `Update Tiles` | Refresh tile lists from VOSpace |
+| `Tiles` | `Band Constraint` | Minimum bands required per tile |
+| `Tiles` | `Require All Bands` | Require that all requested bands are available to download a tile |
+| `Cutouts` | `Cutout Mode` | Create cutouts around input coordinates: `After Download` or `Direct Only`. Works if input is `Sky Coordinates` or `Table` |
+| `Plotting` | `Catalog Name` | Name of the catalog that should be used to plot cutouts around objects. `Auto` will use the most recent input |
+| `Plotting` | `RGB Bands` | Select which bands should be mapped to red, green and blue to create color images. Locked in after selection. Hit the `Reset` button to start over. |
+| `Plotting` | `Display Mode` | `Grid`: plot object cutouts in a grid; `Channel`: show individual bands + RGB image for every object |
 
 ### Band Configuration
 
@@ -310,7 +281,7 @@ bands:
     vos: "vos:cfis/whigs/stack_images_CFIS_scheme"
     suffix: ".fits"
     delimiter: "_"
-    fits_ext: 1  # data extension in fits file
+    fits_ext: 1  # Data extension in fits file
     zfill: 0  # No zero padding the tile numbers in the file name
     zp: 27.0  # Zero point magnitude
 ```
