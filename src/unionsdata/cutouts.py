@@ -204,9 +204,9 @@ def make_multiband_cutouts(
     Returns:
         Array of cutouts with shape (n_objects, n_bands, cutout_size, cutout_size)
     """
-    # Convert DataFrame coordinates to integer pixel positions
-    xs = np.floor(df['x'].to_numpy(dtype=np.float32) + 0.5).astype(np.int32)
-    ys = np.floor(df['y'].to_numpy(dtype=np.float32) + 0.5).astype(np.int32)
+    # Convert DataFrame coordinates to integer pixel positions (need to convert from 1-based to 0-based)
+    xs = np.floor(df['x'].to_numpy(dtype=np.float32) - 0.5).astype(np.int32)
+    ys = np.floor(df['y'].to_numpy(dtype=np.float32) - 0.5).astype(np.int32)
 
     n_bands = multiband_data.shape[0]
     n_objects = len(xs)

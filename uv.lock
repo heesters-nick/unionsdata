@@ -2199,14 +2199,14 @@ wheels = [
 
 [[package]]
 name = "vos"
-version = "3.6.3"
+version = "3.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aenum" },
     { name = "cadcutils" },
     { name = "html2text" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/36/b187166ed2b090c50b2f0d293ffab278a176ae78a76e1cccc88b0cd776dc/vos-3.6.3.tar.gz", hash = "sha256:19be7e6ce4fb2bd540c74c4c20fbc2853bea7d881084eab52fd886a2abe018e1", size = 103421, upload-time = "2025-07-16T18:56:04.782Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/6c/445bbedf2f90e71c09ff890aa8b409af5d074b1578eef383117cbcdfd09a/vos-3.6.4.tar.gz", hash = "sha256:67e4e24689ee881124b6670d7d2fc6527cc404687fc527fffc20cf5b1bd4c0bd", size = 103445, upload-time = "2025-12-12T00:20:56.398Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/7f/8f62a64773b4556f7096243a9baf800cd42f4adad0d8f432fdd2db2bbfec/vos-3.6.3-py3-none-any.whl", hash = "sha256:3d0c2f79ef711d006f1c396ecb18ffe0ec2b2963bf66ce8d07ce3a8287c4bc8c", size = 153377, upload-time = "2025-07-16T18:56:02.946Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/21/e2d351883aa11b9175223a78d3a77b0fedf86461596cdbfb019893ca9260/vos-3.6.4-py3-none-any.whl", hash = "sha256:4a7b2248bad0f50da465a47ab1c819dff8378c189c184c2d8e2c17a714c62f17", size = 153404, upload-time = "2025-12-12T00:20:53.232Z" },
 ]
