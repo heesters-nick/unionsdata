@@ -93,7 +93,7 @@ class PathExistsValidator(Validator):
 class CertificateValidator(Validator):
     """Validate that a certificate file exists and is not expired."""
 
-    def __init__(self, warning_days: int = 2) -> None:
+    def __init__(self, warning_days: int = 1) -> None:
         super().__init__()
         self.warning_days = warning_days
 

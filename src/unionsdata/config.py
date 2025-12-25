@@ -646,7 +646,7 @@ def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
     return config_path
 
 
-def check_cert_expiry(cert_path: Path, days_warning: int = 5) -> None:
+def check_cert_expiry(cert_path: Path, days_warning: int = 1) -> None:
     try:
         with open(cert_path, 'rb') as f:
             cert = x509.load_pem_x509_certificate(f.read(), default_backend())

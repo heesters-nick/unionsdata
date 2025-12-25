@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - terminal user interface (TUI) for download configuration
 - automatically detect most recent object catalog for plotting
 - monochromatic cutout plotting
+- direct cutout streaming support
 
 ### Changed
 - integrate config validation into unionsdata edit and remove unionsdata validate

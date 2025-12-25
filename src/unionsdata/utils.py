@@ -208,8 +208,6 @@ def tile_finder(
     assert coord_c is not None
     assert catalog is not None
 
-    # available_tiles = avail.unique_tiles
-
     tiles_matching_catalog = np.empty(len(catalog), dtype=object)
     pix_coords = np.empty((len(catalog), 2), dtype=np.float64)
     bands = np.empty(len(catalog), dtype=object)
