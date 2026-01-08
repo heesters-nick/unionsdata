@@ -1,3 +1,4 @@
+import ast
 import logging
 from itertools import chain
 from pathlib import Path
@@ -69,6 +70,9 @@ def load_cutouts(
 
     # Load and filter catalog
     catalog = pd.read_csv(catalog_path)
+    target = set(bands_to_plot)
+    # Filter catalog to only objects with all requested bands
+    catalog = catalog[catalog['bands'].apply(lambda x: target.issubset(ast.literal_eval(x)))]
     if 'cutout_created' not in catalog.columns:
         raise ValueError('Catalog missing "cutout_created" column. Is this an augmented catalog?')
 
@@ -183,8 +187,7 @@ def load_cutouts(
     # Check if any data was loaded
     if len(cutouts_list) == 0:
         raise RuntimeError(
-            f'No cutouts could be loaded with bands {bands_to_plot}. '
-            f'Checked {len(unique_tiles)} tiles, all were skipped.'
+            f'No cutouts could be loaded with bands {bands_to_plot}. Checked {len(unique_tiles)} tiles, all were skipped.'
         )
 
     # Concatenate all data
@@ -339,7 +342,18 @@ def build_plot_filename(
     band_dict: dict[str, BandDict],
     extension: str,
 ) -> str:
-    """..."""
+    """Build filename for saving cutout plots.
+
+    Args:
+        catalog_name: Name of the catalog
+        size_pix: Size of cutouts in pixels
+        bands: List of band names used
+        band_dict: Band configuration dictionary
+        extension: File extension (e.g., 'png', 'pdf')
+
+    Returns:
+        Filename string
+    """
     band_str = get_bands_short_string(bands, band_dict)
     return f'{catalog_name}_cutouts_{size_pix}_{band_str}.{extension}'
 

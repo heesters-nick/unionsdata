@@ -224,7 +224,11 @@ class TileBandSpec(TypedDict):
 
 
 def tile_band_specs(
-    tile: tuple[int, int], in_dict: dict[str, BandDict], band: str, download_dir: Path
+    tile: tuple[int, int],
+    in_dict: dict[str, BandDict],
+    band: str,
+    download_dir: Path,
+    cutout_mode: str = 'disabled',
 ) -> TileBandSpec:
     """
     Get the necessary information for downloading a tile in a specific band.
@@ -234,6 +238,7 @@ def tile_band_specs(
         in_dict: band dictionary containing the necessary info on the file properties
         band: band name
         download_dir: download directory
+        cutout_mode: mode for cutout ('disabled' by default)
 
     Returns:
         dict: tile_fitsfilename, file_path after download complete, temp_path while download ongoing, vos_path (path to file on server), fits extension of the data, zero point
@@ -249,7 +254,8 @@ def tile_band_specs(
     tile_dir = Path(download_dir) / f'{tile[0]:0>3}_{tile[1]:0>3}'
     tile_dir.mkdir(parents=True, exist_ok=True)
     tile_band_dir = tile_dir / band
-    tile_band_dir.mkdir(parents=True, exist_ok=True)
+    if not cutout_mode == 'direct_only':
+        tile_band_dir.mkdir(parents=True, exist_ok=True)
 
     tile_fitsfilename = (
         f'{prefix}{delimiter}{tile[0]:0>{zfill}}{delimiter}{tile[1]:0>{zfill}}{suffix}'

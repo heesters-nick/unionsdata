@@ -169,8 +169,10 @@ bands:
     return config_file
 
 
-def test_load_settings_basic(test_config: Path) -> None:
+def test_load_settings_basic(test_config: Path, mocker) -> None:
     """Test that a valid config file is loaded correctly."""
+
+    mocker.patch('unionsdata.config.check_cert_expiry')
 
     settings = load_settings(config_path=test_config, check_first_run=False)
 
@@ -188,8 +190,10 @@ def test_load_settings_basic(test_config: Path) -> None:
     assert len(settings.bands) == 6
 
 
-def test_load_settings_cli_override(tmp_path: Path, test_config: Path) -> None:
+def test_load_settings_cli_override(tmp_path: Path, test_config: Path, mocker) -> None:
     """Test that CLI overrides correctly replace config file values."""
+
+    mocker.patch('unionsdata.config.check_cert_expiry')
 
     # CLI overrides
     overrides = {
@@ -267,8 +271,10 @@ def test_load_settings_invalid_band(test_config: Path) -> None:
         load_settings(config_path=test_config, cli_overrides=overrides, check_first_run=False)
 
 
-def test_load_settings_path_resolution(test_config: Path) -> None:
+def test_load_settings_path_resolution(test_config: Path, mocker) -> None:
     """Test that paths are correctly resolved for different machines."""
+
+    mocker.patch('unionsdata.config.check_cert_expiry')
 
     canfar_config = test_config.read_text()
     canfar_config = canfar_config.replace('machine: local', 'machine: canfar')
@@ -339,6 +345,7 @@ def test_load_settings_xdg_data_dir_usage(mocker, test_config: Path) -> None:
     mocker.patch('unionsdata.config.determine_install_mode', return_value=False)
     mocker.patch('unionsdata.config.get_config_path', return_value=test_config)
     mocker.patch('unionsdata.config.is_first_run', return_value=False)
+    mocker.patch('unionsdata.config.check_cert_expiry')
 
     settings = load_settings(config_path=test_config, check_first_run=False)
 

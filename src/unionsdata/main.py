@@ -186,7 +186,7 @@ def run_download(args: argparse.Namespace) -> None:
             logger.error('No objects in catalog for direct cutout mode')
             sys.exit(1)
 
-        n_saved, n_failed, n_skipped = stream_direct_cutouts(
+        n_saved, n_failed, n_skipped, successful_object_ids = stream_direct_cutouts(
             catalog=catalog,
             bands=bands,
             band_dict=all_band_dict,
@@ -197,6 +197,23 @@ def run_download(args: argparse.Namespace) -> None:
             max_retries=max_retries,
             n_workers=download_threads,
         )
+        # Save augmented catalog
+        if not catalog.empty:
+            # Update catalog with cutout_created status
+            catalog['cutout_created'] = (
+                catalog['ID'].astype(str).isin(successful_object_ids).astype(int)
+            )
+
+            # Determine filename
+            if cfg.inputs.source == 'table':
+                input_name = cfg.inputs.table.path.stem
+            else:
+                input_name = 'input_coordinates'
+
+            # Save
+            catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
+            catalog.to_csv(catalog_path, index=False)
+            logger.info(f'Saved augmented catalog to {catalog_path}')
     else:
         if tiles_x_bands is not None:
             logger.debug(f'Filtering to {len(tiles_x_bands)} tiles based on input criteria')

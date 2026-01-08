@@ -34,9 +34,9 @@ cutouts:
 plotting:
   enable: true                                                     # create plots of cutouts
   catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
-  bands: ['cfis-u', 'cfis-r', 'ps-i']                              # bands to use for RGB cutouts; null = first 3 from runtime.bands
+  bands: ['cfis-u', 'cfis_lsb-r', 'ps-i']                              # bands to use for RGB cutouts; null = first 3 from runtime.bands
   size_pix: 512                                                    # square size of cutouts in pixels
-  mode: "channel"                                                     # grid | channel
+  mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
   figsize: null                                                    # figure size (width, height) in inches; null for automatic
   save_plot: true                                                  # save plots to disk
@@ -139,7 +139,7 @@ bands:
 
   cfis_lsb-r:
     name: "CFIS_LSB"
-    band: "r"
+    band: "lsb-r"
     vos: "vos:cfis/tiles_LSB_DR6"
     suffix: ".r.fits"
     delimiter: "."

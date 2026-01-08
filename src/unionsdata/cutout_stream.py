@@ -284,7 +284,9 @@ def download_worker(
 
             try:
                 # Get base URL from existing tile_band_specs
-                specs = tile_band_specs(job.tile, band_dict, job.band, download_dir)
+                specs = tile_band_specs(
+                    job.tile, band_dict, job.band, download_dir, cutout_mode='direct_only'
+                )
                 url = specs['http_url'] + job.cutout_query
 
                 # Download with retries
@@ -360,7 +362,7 @@ def stream_direct_cutouts(
     max_retries: int,
     n_workers: int,
     batch_size: int = 500,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, set[str]]:
     """
     Stream cutouts directly from VOSpace.
 
@@ -383,10 +385,10 @@ def stream_direct_cutouts(
         batch_size: Number of objects to process per batch
 
     Returns:
-        Tuple of (n_new, n_updated, n_skipped)
+        Tuple of (n_new, n_updated, n_skipped, successful_object_ids)
     """
     if catalog.empty:
-        return 0, 0, 0
+        return 0, 0, 0, set()
 
     # Sort catalog by tile for efficiency
     catalog = catalog.sort_values(by='tile').reset_index(drop=True)
@@ -402,19 +404,22 @@ def stream_direct_cutouts(
 
     if catalog.empty:
         logger.warning('No valid cutouts after filtering')
-        return 0, 0, n_invalid_coords
+        return 0, 0, n_invalid_coords, set()
 
     # Availability check
     total_available = check_cutout_availability(catalog, bands)
 
     if total_available == 0:
         logger.warning('No cutouts available to download.')
-        return 0, 0, n_invalid_coords
+        return 0, 0, n_invalid_coords, set()
 
     # Initialize counters
     total_new = 0
     total_updated = 0
     total_skipped = n_invalid_coords
+
+    # Set of successfully downloaded object IDs
+    successful_object_ids: set[str] = set()
 
     # Shared state for all batches
     job_queue: Queue[CutoutJob | None] = Queue()
@@ -422,6 +427,7 @@ def stream_direct_cutouts(
     results_lock = Lock()
     shutdown = Event()
     stats = StreamingStats()
+    n_workers = min(n_workers, total_available)
 
     # Create workers once and reuse across all batches
     workers = [
@@ -511,6 +517,12 @@ def stream_direct_cutouts(
                 for tile_key in chunk['tile'].unique():
                     tile_chunk = chunk[chunk['tile'] == tile_key]
 
+                    # Record successful IDs
+                    batch_success_ids = [
+                        str(obj_id) for obj_id in tile_chunk['ID'] if str(obj_id) in results
+                    ]
+                    successful_object_ids.update(batch_success_ids)
+
                     n_n, n_u, n_s = save_results_by_tile(
                         results=results,
                         catalog=tile_chunk,
@@ -547,7 +559,7 @@ def stream_direct_cutouts(
     logger.info(f'  ❌ Download Failures: {stats.failed}')
     logger.info('=' * 70)
 
-    return total_new, total_updated, total_skipped
+    return total_new, total_updated, total_skipped, successful_object_ids
 
 
 def save_results_by_tile(

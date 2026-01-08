@@ -280,7 +280,10 @@ class Settings(BaseModel):
         if not self.paths.cert_path.exists():
             raise ValueError(f'Certificate file does not exist: {self.paths.cert_path}')
 
-        check_cert_expiry(self.paths.cert_path)
+        try:
+            check_cert_expiry(self.paths.cert_path)
+        except ValueError:
+            sys.exit(1)
 
         return self
 
@@ -647,20 +650,28 @@ def get_config_path(is_editable: bool, config_path: Path | None = None) -> Path:
 
 
 def check_cert_expiry(cert_path: Path, days_warning: int = 1) -> None:
-    try:
-        with open(cert_path, 'rb') as f:
-            cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+    """Check certificate expiry and log warnings if close to expiry.
+    Args:
+        cert_path: Path to the PEM certificate file
+        days_warning: Number of days before expiry to issue a warning
 
-        # Simple UTC comparison to avoid timezone issues
-        expiry = cert.not_valid_after_utc
-        time_left = expiry - datetime.now(UTC)
+    Raises:
+        ValueError: If the certificate is expired
 
-        if time_left.total_seconds() < 0:
-            raise ValueError(f'Certificate at {cert_path} EXPIRED on {expiry}.')
+    Returns:
+        None
+    """
 
-        if time_left < timedelta(days=days_warning):
-            logger.warning(f'Certificate expires in {time_left.days} days ({expiry}).')
+    with open(cert_path, 'rb') as f:
+        cert = x509.load_pem_x509_certificate(f.read(), default_backend())
 
-    except Exception as e:
-        # Mimic original behavior: log error instead of crashing
-        logger.warning(f'Could not validate certificate: {e}')
+    # Simple UTC comparison to avoid timezone issues
+    expiry = cert.not_valid_after_utc
+    time_left = expiry - datetime.now(UTC)
+
+    if time_left.total_seconds() < 0:
+        logger.error(f'Certificate at {cert_path} EXPIRED on {expiry}.')
+        raise ValueError
+
+    if time_left < timedelta(days=days_warning):
+        logger.warning(f'Certificate expires in {time_left.days} days ({expiry}).')

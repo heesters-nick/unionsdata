@@ -227,6 +227,7 @@ def mock_config_loading(mocker, test_config: Path):
     mocker.patch('unionsdata.config.determine_install_mode', return_value=True)
     mocker.patch('unionsdata.config.get_config_path', return_value=test_config)
     mocker.patch('unionsdata.config.is_first_run', return_value=False)
+    mocker.patch('unionsdata.config.check_cert_expiry')
 
 
 @pytest.fixture
@@ -563,8 +564,6 @@ def test_run_download_integration_resume_mode(
 
     mocker.patch('unionsdata.download.verify_download', side_effect=mock_verify)
 
-    # CHANGE: Create a VALID FITS file for the existing one
-    # The previous version just wrote b'0' bytes, which would fail the new integrity check
     hdul = fits.HDUList(
         [fits.PrimaryHDU(), fits.ImageHDU(data=np.zeros((10, 10), dtype=np.float32))]
     )
