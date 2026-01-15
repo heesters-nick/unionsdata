@@ -61,11 +61,6 @@ unionsdata = "unionsdata.main:cli_entry"
 [tool.hatch.build.targets.wheel]
 packages = ["src/unionsdata"]
 
-[tool.hatch.build]
-include = [
-    "src/unionsdata/config.yaml"
-]
-
 [tool.hatch.version]
 source = "vcs"
 
