@@ -12,7 +12,7 @@ permissions:
 jobs:
   publish-to-test-pypi:
     name: Publish to TestPyPI
-    if: contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+    if: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
     runs-on: ubuntu-latest
     environment:
       name: testpypi_unionsdata
@@ -33,7 +33,7 @@ jobs:
 
   publish-to-pypi:
     name: Publish to PyPI
-    if: success() && !(contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc'))
+    if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc') }}
     runs-on: ubuntu-latest
     environment:
       name: pypi_unionsdata
@@ -54,7 +54,7 @@ jobs:
     name: Create GitHub Release
     # This job will only run if the publish-to-pypi job was successful
     needs: publish-to-pypi
-    if: needs.publish-to-pypi.result == 'success'
+    if: ${{ needs.publish-to-pypi.result == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -78,15 +78,14 @@ jobs:
           validation_level: error
 
       - name: Fail if changelog entry is missing
+        if: ${{ steps.changelog.outputs.changes == '' }}
         run: |
-          if [ -z "${{ steps.changelog.outputs.changes }}" ]; then
-            echo "::error::No changelog entry found for version ${{ steps.get_version.outputs.version }} in CHANGELOG.md."
-            echo "Add a section like '## [${{ steps.get_version.outputs.version }}] - YYYY-MM-DD' before tagging."
-            exit 1
-          fi
+          echo "::error::No changelog entry found for version ${{ steps.get_version.outputs.version }} in CHANGELOG.md."
+          echo "Add a section like '## [${{ steps.get_version.outputs.version }}] - YYYY-MM-DD' before tagging."
+          exit 1
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

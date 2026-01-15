@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for versioning tools
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -22,6 +24,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: |
@@ -35,4 +39,10 @@ jobs:
         continue-on-error: false
 
       - name: Test with pytest
-        run: uv run pytest tests/ --verbose
+        run: uv run pytest tests/ --verbose --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
