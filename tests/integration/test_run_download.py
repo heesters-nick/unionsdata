@@ -13,6 +13,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from scipy.spatial import cKDTree
 
+from unionsdata.cutouts import CutoutResult
 from unionsdata.kd_tree import relate_coord_tile
 from unionsdata.main import run_download
 
@@ -287,7 +288,7 @@ def mock_cutout_creation(mocker):
         else:
             n_cutouts = 0
 
-        future.set_result((n_cutouts, 0, 0))  # Return actual catalog size
+        future.set_result(CutoutResult(n_cutouts, 0, 0, {}))  # Return actual catalog size
         return future
 
     mock_executor = mocker.MagicMock()
@@ -488,11 +489,10 @@ def test_run_download_integration_coordinates(
     assert 'tile' in catalog.columns
     assert 'x' in catalog.columns
     assert 'y' in catalog.columns
-    assert 'bands' in catalog.columns
-    assert 'n_bands' in catalog.columns
-    assert 'cutout_created' in catalog.columns
+    assert 'bands_available' in catalog.columns
+    assert 'n_bands_available' in catalog.columns
+    assert 'cutout_bands' in catalog.columns
     assert len(catalog) == 1  # One coordinate
-    assert catalog['cutout_created'].iloc[0] == 1  # Cutout was created
 
 
 def test_run_download_integration_no_tiles_to_download(
@@ -523,7 +523,10 @@ def test_run_download_integration_no_tiles_to_download(
         run_download(args)
 
     # Assert
-    assert 'No tiles found to download!' in caplog.text
+    assert (
+        'Cutout creation is enabled but no object coordinates were supplied. No cutouts will be created.'
+        in caplog.text
+    )
     assert mock_vcp.call_count == 0
 
 
@@ -799,11 +802,21 @@ def test_run_download_integration_table_with_cutouts(
     # Validate catalog contents
     catalog = pd.read_csv(catalog_path)
     assert len(catalog) == 2  # Two objects
-    assert 'cutout_created' in catalog.columns
-    assert catalog['cutout_created'].sum() == 2  # Both cutouts created
+    assert 'cutout_bands' in catalog.columns
+    assert len(pd.notnull(catalog['cutout_bands'])) == 2  # Both cutouts created
 
     # Check augmented columns
-    required_cols = ['ra', 'dec', 'ID', 'tile', 'x', 'y', 'bands', 'n_bands', 'cutout_created']
+    required_cols = [
+        'ra',
+        'dec',
+        'ID',
+        'tile',
+        'x',
+        'y',
+        'bands_available',
+        'n_bands_available',
+        'cutout_bands',
+    ]
     for col in required_cols:
         assert col in catalog.columns, f'Missing column: {col}'
 

@@ -1,4 +1,6 @@
 import logging
+import multiprocessing
+from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +12,8 @@ from astropy.units import Unit
 from numpy.typing import NDArray
 
 from unionsdata.config import BandDict
-from unionsdata.utils import get_dataset, open_fits, tile_str
+from unionsdata.logging_setup import setup_logger
+from unionsdata.utils import get_dataset, get_wavelength_order, open_fits, tile_str
 
 logger = logging.getLogger(__name__)
 
@@ -18,22 +21,19 @@ logger = logging.getLogger(__name__)
 # ========== Helper Functions ==========
 
 
-def get_wavelength_order(bands: list[str], band_dictionary: dict[str, BandDict]) -> list[str]:
-    """
-    Sort bands by wavelength order using the band dictionary's key order.
+def worker_log_init(log_dir: Path, name: str, level: int) -> None:
+    """Initialize logging in worker process."""
+    setup_logger(log_dir, name, level, force=True)
 
-    The band dictionary keys are ordered from shortest to longest wavelength
-    (u -> g -> r -> i -> z), so we filter and sort by that canonical order.
 
-    Args:
-        bands: List of band names to sort
-        band_dictionary: Full band configuration dictionary (defines wavelength order)
+@dataclass
+class CutoutResult:
+    """Result of cutout creation for a tile."""
 
-    Returns:
-        Bands sorted by wavelength (shortest to longest)
-    """
-    canonical_order = list(band_dictionary.keys())
-    return [b for b in canonical_order if b in bands]
+    n_new: int
+    n_updated: int
+    n_skipped: int
+    object_bands: dict[str, set[str]]  # object_id -> list of cutout bands
 
 
 @dataclass
@@ -343,7 +343,7 @@ def create_cutouts_for_tile(
     all_band_dictionary: dict[str, BandDict],
     output_dir: Path,
     cutout_size: int,
-) -> tuple[int, int, int]:
+) -> CutoutResult:
     """
     Create cutouts for objects in a tile.
 
@@ -370,6 +370,8 @@ def create_cutouts_for_tile(
     tile_key = tile_str(tile)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f'{tile_key}_cutouts_{cutout_size}.h5'
+    # track created bands per object
+    object_bands: dict[str, set[str]] = {}
     BATCH_SIZE = 1000
 
     # Sort requested bands by wavelength
@@ -388,7 +390,7 @@ def create_cutouts_for_tile(
             output_path.unlink()
         except OSError as e:
             logger.error(f'Failed to delete corrupt file {output_path}: {e}')
-            return 0, 0, 0  # Fail gracefully
+            return CutoutResult(0, 0, 0, {})  # Fail gracefully
 
     if not existing_info.exists:
         # Case 1: No existing file - create cutouts for all objects
@@ -415,7 +417,11 @@ def create_cutouts_for_tile(
                 output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
             )
 
-        return len(catalog), 0, 0
+        # Record cutout bands for all objects
+        for obj_id in catalog['ID'].astype(str):
+            object_bands[obj_id] = set(loaded_bands)
+
+        return CutoutResult(len(catalog), 0, 0, object_bands)
 
     # File exists - determine what's new
     existing_bands_set = set(existing_info.bands)
@@ -476,8 +482,17 @@ def create_cutouts_for_tile(
             # Re-read existing_info after merge - bands have changed
             existing_info = analyze_existing_file(output_path)
 
+            merged_bands = existing_info.bands  # Now contains old + new bands
+            for obj_id in matched_catalog['ID'].astype(str):
+                object_bands[obj_id] = set(merged_bands)
+
     elif n_matched > 0:
         n_skipped_objects = n_matched
+
+        # Record existing bands for skipped objects
+        for obj_id in catalog[is_match]['ID'].astype(str):
+            object_bands[obj_id] = set(existing_info.bands)
+
         logger.debug(f'Tile {tile_key}: No new bands to add, skipping {n_matched} existing objects')
 
     # Case 3: Append new objects with cutouts in ALL available bands
@@ -513,7 +528,142 @@ def create_cutouts_for_tile(
                 output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
             )
 
-    return n_new_objects, n_updated_objects, n_skipped_objects
+        # Record cutout bands for new objects
+        for obj_id in new_object_catalog['ID'].astype(str):
+            object_bands[obj_id] = set(loaded_bands)
+
+    return CutoutResult(n_new_objects, n_updated_objects, n_skipped_objects, object_bands)
+
+
+def create_cutouts_for_existing_tiles(
+    catalog: pd.DataFrame,
+    bands: list[str],
+    download_dir: Path,
+    all_band_dictionary: dict[str, BandDict],
+    cutout_size: int,
+    cutout_subdir: str,
+    num_workers: int,
+    log_dir: Path,
+    log_name: str,
+    log_level: int,
+    cutout_stats: dict[str, int],
+    cutout_success_map: dict[str, set[str]],
+) -> None:
+    """
+    Create cutouts for tiles that already exist on disk.
+
+    This is used when tile FITS files were downloaded in a previous run
+    but cutouts still need to be created.
+
+    Args:
+        catalog: DataFrame with 'tile' and 'bands_to_cutout' columns
+        bands: List of bands to create cutouts for
+        download_dir: Root directory where tiles are stored
+        all_band_dictionary: Full band configuration dictionary
+        cutout_size: Square cutout size in pixels
+        cutout_subdir: Subdirectory name for cutout HDF5 files
+        num_workers: Number of parallel worker processes
+        log_dir: Directory for log files
+        log_name: Log file name
+        log_level: Logging level
+
+    Returns:
+        None
+    """
+
+    if catalog.empty:
+        return None
+    # Filter to objects that actually need cutouts
+    needs_cutout = catalog[catalog['bands_to_cutout'].map(len) > 0].copy()
+
+    if needs_cutout.empty:
+        logger.info('No objects need cutout creation.')
+        return None
+
+    # Group by tile
+    tiles_to_process: dict[str, pd.DataFrame] = {}
+    for tile_key, group in needs_cutout.groupby('tile'):
+        tiles_to_process[str(tile_key)] = group.reset_index(drop=True)
+
+    # Verify tiles exist on disk and collect valid ones
+    valid_tiles: list[tuple[tuple[int, int], Path, list[str], pd.DataFrame]] = []
+
+    for tile_key, tile_catalog in tiles_to_process.items():
+        tile_parts = tile_key.split('_')
+        tile = (int(tile_parts[0]), int(tile_parts[1]))
+        tile_dir = download_dir / tile_key
+
+        if not tile_dir.exists():
+            logger.warning(f'Tile directory does not exist, skipping: {tile_dir}')
+            continue
+
+        # Check which bands are available for this tile
+        available_bands = []
+        for band in bands:
+            band_dir = tile_dir / band
+            if band_dir.exists() and any(band_dir.glob('*.fits')):
+                available_bands.append(band)
+
+        if not available_bands:
+            logger.warning(f'No band data found for tile {tile_key}, skipping')
+            continue
+
+        valid_tiles.append((tile, tile_dir, available_bands, tile_catalog))
+
+    if not valid_tiles:
+        logger.warning('No valid tiles found with existing data.')
+        return None
+
+    mp_context = multiprocessing.get_context('spawn')
+
+    with ProcessPoolExecutor(
+        max_workers=num_workers,
+        mp_context=mp_context,
+        initializer=worker_log_init,
+        initargs=(log_dir, log_name, log_level),
+    ) as executor:
+        # Submit all jobs
+        futures: dict[str, Future[CutoutResult]] = {}
+
+        for tile, tile_dir, available_bands, tile_catalog in valid_tiles:
+            tile_key = tile_str(tile)
+            output_dir = tile_dir / cutout_subdir
+
+            future = executor.submit(
+                create_cutouts_for_tile,
+                tile=tile,
+                tile_dir=tile_dir,
+                bands=available_bands,
+                catalog=tile_catalog,
+                all_band_dictionary=all_band_dictionary,
+                output_dir=output_dir,
+                cutout_size=cutout_size,
+            )
+            futures[tile_key] = future
+
+        for tile_key, future in futures.items():
+            try:
+                result = future.result(timeout=300)
+
+                cutout_stats['new'] += result.n_new
+                cutout_stats['updated'] += result.n_updated
+                cutout_stats['skipped'] += result.n_skipped
+
+                cutout_success_map.update(result.object_bands)
+
+                if result.n_new + result.n_updated + result.n_skipped > 0:
+                    parts = []
+                    if result.n_new > 0:
+                        parts.append(f'{result.n_new} new')
+                    if result.n_updated > 0:
+                        parts.append(f'{result.n_updated} updated')
+                    if result.n_skipped > 0:
+                        parts.append(f'{result.n_skipped} skipped')
+                    logger.debug(f'✅ Cutouts for tile {tile_key}: {", ".join(parts)}')
+
+            except Exception as e:
+                cutout_stats['failed'] += 1
+                logger.error(f'❌ Cutouts failed for tile {tile_key}: {e}')
 
 
 def write_to_h5(

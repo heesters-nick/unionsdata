@@ -1,4 +1,3 @@
-import ast
 import logging
 from itertools import chain
 from pathlib import Path
@@ -12,7 +11,7 @@ from numpy.typing import NDArray
 
 from unionsdata.config import BandDict
 from unionsdata.make_rgb import generate_rgb, normalize_mono, preprocess_cutout
-from unionsdata.utils import get_bands_short_string, get_dataset
+from unionsdata.utils import filter_catalog_all_bands, get_bands_short_string, get_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +70,14 @@ def load_cutouts(
     # Load and filter catalog
     catalog = pd.read_csv(catalog_path)
     target = set(bands_to_plot)
-    # Filter catalog to only objects with all requested bands
-    catalog = catalog[catalog['bands'].apply(lambda x: target.issubset(ast.literal_eval(x)))]
-    if 'cutout_created' not in catalog.columns:
-        raise ValueError('Catalog missing "cutout_created" column. Is this an augmented catalog?')
 
-    catalog_success = catalog[catalog['cutout_created'] == 1].copy()
-    logger.debug(f'Found {len(catalog_success)}/{len(catalog)} objects with successful cutouts')
+    catalog_success = filter_catalog_all_bands(
+        catalog=catalog,
+        required_bands=target,
+        col_name='cutout_bands',
+    )
+
+    logger.info(f'Found {len(catalog_success)}/{len(catalog)} objects with successful cutouts')
 
     if len(catalog_success) == 0:
         raise RuntimeError('No objects with successful cutouts found in catalog')

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+import pandas as pd
 import yaml
 from rich.logging import RichHandler
 
@@ -24,7 +25,8 @@ from unionsdata.config import (
     settings_to_dict,
 )
 from unionsdata.cutout_stream import stream_direct_cutouts
-from unionsdata.download import download_tiles
+from unionsdata.cutouts import create_cutouts_for_existing_tiles
+from unionsdata.download import download_tiles, report_download_summary
 from unionsdata.logging_setup import setup_logger
 from unionsdata.plotting import (
     build_plot_filename,
@@ -36,8 +38,16 @@ from unionsdata.plotting import (
 from unionsdata.tui import run_config_editor
 from unionsdata.utils import (
     TileAvailability,
+    clean_process_columns,
+    filter_for_processing,
     input_to_tile_list,
+    jobs_from_catalog,
+    jobs_from_tiles,
+    load_existing_catalog,
+    merge_w_existing_catalog,
+    process_download_results,
     query_availability,
+    update_catalog,
 )
 from unionsdata.yaml_utils import yaml_to_string
 
@@ -121,6 +131,10 @@ def run_download(args: argparse.Namespace) -> None:
     download_threads = cfg.runtime.n_download_threads
     cert_path = cfg.paths.cert_path
     max_retries = cfg.runtime.max_retries
+    require_all = cfg.tiles.require_all_specified_bands
+    cutouts_enabled = cfg.cutouts.mode != 'disabled'
+    object_input = cfg.inputs.source not in ['tiles', 'all_available']
+    cutout_mode = cfg.cutouts.mode
 
     setup_logger(
         log_dir=cfg.paths.log_directory,
@@ -163,21 +177,65 @@ def run_download(args: argparse.Namespace) -> None:
     # Filter tiles to only those in selected bands
     selected_tiles = [all_tiles[list(all_band_dict.keys()).index(band)] for band in bands]
 
-    availability = TileAvailability(selected_tiles, selected_band_dict)
+    availability_sel = TileAvailability(selected_tiles, selected_band_dict)
 
     # Process input to get list of tiles to download
     logger.debug('Processing input to determine tiles to download...')
     # get the list of tiles
     _, tiles_x_bands, catalog = input_to_tile_list(
-        availability,
-        all_unique_tiles,
-        cfg.tiles.band_constraint,
-        cfg.inputs,
-        tile_info_dir,
+        avail_all=availability_all,
+        avail_sel=availability_sel,
+        all_unique_tiles=all_unique_tiles,
+        band_constr=cfg.tiles.band_constraint,
+        inputs=cfg.inputs,
+        tile_info_dir=tile_info_dir,
     )
 
-    # Branch off for direct cutout streaming using augmented catalog
-    if cfg.cutouts.mode == 'direct_only':
+    catalog_to_process: pd.DataFrame | None = catalog.copy()
+    catalog_path = Path()
+
+    # Stats counters
+    download_stats = {'downloaded': 0, 'skipped': 0, 'failed': 0, 'rejected': 0}
+    cutout_stats = {'new': 0, 'updated': 0, 'skipped': 0, 'failed': 0, 'rejected': 0}
+
+    tile_success_map: dict[str, set[str]] = {}  # {'123_456': {'r', 'i'}}
+    cutout_success_map: dict[str, set[str]] = {}  # {'objectID': {'r', 'i'}}
+
+    # Only relevant for object-based input
+    if object_input:
+        catalog_existing, catalog_path = load_existing_catalog(
+            inputs=cfg.inputs, tables_dir=cfg.paths.dir_tables
+        )
+
+        catalog = merge_w_existing_catalog(
+            fresh_catalog=catalog,
+            existing_catalog=catalog_existing,
+        )
+
+        catalog_to_process = filter_for_processing(
+            catalog=catalog,
+            bands=bands,
+            download_col='bands_downloaded',
+            cutout_col='cutout_bands',
+            require_all=require_all,
+            cutouts_enabled=cutouts_enabled,
+            download_stats=download_stats,
+            cutout_stats=cutout_stats,
+        )
+
+        # Early exit if nothing to do
+        if catalog_to_process is None:
+            logger.info('Everything is already downloaded and cut out. Nothing to do.')
+            # Cleanup: remove bands_to_process column if it exists
+            for col_name in ['bands_to_download', 'bands_to_cutout']:
+                if col_name in catalog.columns:
+                    catalog.drop(columns=[col_name], inplace=True)
+            # Save augmented catalog
+            catalog.to_csv(catalog_path, index=False)
+            sys.exit(0)
+
+    # Branch off for direct cutout streaming
+    if cutout_mode == 'direct_only':
         if cfg.inputs.source not in ['coordinates', 'table']:
             logger.error('Direct cutout mode requires coordinates or table input')
             sys.exit(1)
@@ -186,8 +244,11 @@ def run_download(args: argparse.Namespace) -> None:
             logger.error('No objects in catalog for direct cutout mode')
             sys.exit(1)
 
-        n_saved, n_failed, n_skipped, successful_object_ids = stream_direct_cutouts(
-            catalog=catalog,
+        assert catalog_to_process is not None
+
+        logger.info(f'Processing {len(catalog_to_process)}/{len(catalog)} objects...')
+        stream_direct_cutouts(
+            catalog=catalog_to_process,
             bands=bands,
             band_dict=all_band_dict,
             download_dir=download_dir,
@@ -196,111 +257,133 @@ def run_download(args: argparse.Namespace) -> None:
             cert_path=cert_path,
             max_retries=max_retries,
             n_workers=download_threads,
+            cutout_stats=cutout_stats,
+            cutout_success_map=cutout_success_map,
         )
+
         # Save augmented catalog
-        if not catalog.empty:
-            # Update catalog with cutout_created status
-            catalog['cutout_created'] = (
-                catalog['ID'].astype(str).isin(successful_object_ids).astype(int)
+        if not catalog.empty and cutout_success_map:
+            catalog = update_catalog(
+                catalog=catalog, successful_bands_map=cutout_success_map, band_dict=all_band_dict
             )
 
-            # Determine filename
-            if cfg.inputs.source == 'table':
-                input_name = cfg.inputs.table.path.stem
-            else:
-                input_name = 'input_coordinates'
+        # Cleanup: remove bands_to_process column if it exists
+        catalog = clean_process_columns(catalog)
 
-            # Save
-            catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
+        if object_input:
             catalog.to_csv(catalog_path, index=False)
             logger.info(f'Saved augmented catalog to {catalog_path}')
     else:
-        if tiles_x_bands is not None:
-            logger.debug(f'Filtering to {len(tiles_x_bands)} tiles based on input criteria')
-            tiles_set = set(tiles_x_bands)  # Convert list to set for faster lookup
-
-            filtered_tiles = [
-                [tile for tile in band_tiles if tile in tiles_set] for band_tiles in selected_tiles
-            ]
-            availability = TileAvailability(filtered_tiles, selected_band_dict)
-
-        # Create download jobs based on require_all_bands setting
-        download_jobs = []
-
-        if cfg.tiles.require_all_specified_bands:
-            # Get tiles available in the specified bands and create download jobs
-            logger.info(f'Requiring all specified bands: {bands}')
-            tiles_to_process = availability.get_tiles_for_bands(bands)
-            logger.info(f'Found {len(tiles_to_process)} tiles available in all requested bands')
-
-            for tile in tiles_to_process:
-                for band in bands:
-                    download_jobs.append((tile, band))
+        # Build list of download jobs
+        if catalog_to_process is not None and not catalog_to_process.empty and object_input:
+            needed_jobs = jobs_from_catalog(catalog_to_process)
+        elif not object_input and tiles_x_bands:
+            needed_jobs = jobs_from_tiles(
+                tiles=tiles_x_bands, bands=bands, avail=availability_sel, require_all=require_all
+            )
         else:
-            # Get tiles available in any of the specified bands
-            logger.info(f'Requiring any of the specified bands: {bands}')
-            for band in bands:
-                band_tiles = availability.band_tiles(band)
-                logger.debug(f'  {band}: {len(band_tiles)} tiles available')
-                for tile in band_tiles:
-                    download_jobs.append((tile, band))
-
-        logger.info(f'Total download jobs: {len(download_jobs)}')
-
-        # Group jobs by band for logging
-        jobs_by_band: dict[str, int] = {}
-        for _, band in download_jobs:
-            jobs_by_band[band] = jobs_by_band.get(band, 0) + 1
-
-        for band, count in jobs_by_band.items():
-            logger.info(f'  {band}: {count} tiles')
-
-        if not download_jobs:
-            logger.warning('No tiles found to download!')
+            logger.info('No tiles or objects to process.')
             return
 
-        # Download the tiles
-        download_threads = min(download_threads, len(download_jobs))
-        logger.debug(f'Starting downloads using {download_threads} threads...')
-        try:
-            total_jobs, completed_jobs, failed_jobs, tile_cutout_info = download_tiles(
-                tiles_to_download=download_jobs,
-                band_dictionary=selected_band_dict,
-                all_band_dictionary=all_band_dict,
-                download_dir=download_dir,
-                requested_bands=set(bands),
-                num_threads=download_threads,
-                num_cutout_workers=cfg.runtime.n_cutout_processes,
-                cert_path=cert_path,
-                max_retries=max_retries,
+        # Sort for deterministic execution
+        download_jobs = sorted(needed_jobs)
+
+        # Log download summary
+        total_downloads = len(download_jobs)
+        if total_downloads > 0:
+            logger.info(f'Total download jobs: {total_downloads}')
+            jobs_by_band: dict[str, int] = dict.fromkeys(bands, 0)
+            for _, band in download_jobs:
+                jobs_by_band[band] = jobs_by_band.get(band, 0) + 1
+            for band, count in jobs_by_band.items():
+                logger.info(f'  {band}: {count} tiles')
+
+        if download_jobs:
+            # Download the tiles
+            download_threads = min(download_threads, len(download_jobs))
+            logger.debug(f'Starting downloads using {download_threads} threads...')
+            try:
+                download_tiles(
+                    tiles_to_download=download_jobs,
+                    band_dictionary=selected_band_dict,
+                    all_band_dictionary=all_band_dict,
+                    download_dir=download_dir,
+                    requested_bands=set(bands),
+                    num_threads=download_threads,
+                    num_cutout_workers=cfg.runtime.n_cutout_processes,
+                    cert_path=cert_path,
+                    max_retries=max_retries,
+                    catalog=catalog,
+                    cutouts=cfg.cutouts,
+                    log_dir=cfg.paths.log_directory,
+                    log_name=cfg.logging.name,
+                    log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
+                    download_stats=download_stats,
+                    cutout_stats=cutout_stats,
+                    tile_success_map=tile_success_map,
+                    cutout_success_map=cutout_success_map,
+                )
+            except Exception as e:
+                logger.error(f'Error during download: {e}')
+                raise
+        else:
+            logger.info('No tiles to download.')
+
+        # Check if additional cutouts needed for existing tiles
+        if cutouts_enabled and catalog_to_process is not None and object_input:
+            # Check if any objects still need cutouts
+            still_need_cutouts = catalog_to_process[
+                catalog_to_process['bands_to_cutout'].map(len) > 0
+            ]
+
+            # Exclude objects that already got cutouts during download phase
+            already_done = set(cutout_success_map.keys())
+            still_need_cutouts = still_need_cutouts[
+                ~still_need_cutouts['ID'].astype(str).isin(already_done)
+            ]
+
+            if not still_need_cutouts.empty:
+                logger.info(
+                    f'Creating cutouts for {len(still_need_cutouts)} objects on existing tiles...'
+                )
+
+                create_cutouts_for_existing_tiles(
+                    catalog=still_need_cutouts,
+                    bands=bands,
+                    download_dir=download_dir,
+                    all_band_dictionary=all_band_dict,
+                    cutout_size=cfg.cutouts.size_pix,
+                    cutout_subdir=cfg.cutouts.output_subdir,
+                    num_workers=cfg.runtime.n_cutout_processes,
+                    log_dir=cfg.paths.log_directory,
+                    log_name=cfg.logging.name,
+                    log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
+                    cutout_stats=cutout_stats,
+                    cutout_success_map=cutout_success_map,
+                )
+
+        if not catalog.empty:
+            catalog = process_download_results(
                 catalog=catalog,
-                cutouts=cfg.cutouts,
-                log_dir=cfg.paths.log_directory,
-                log_name=cfg.logging.name,
-                log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
+                tile_progress=tile_success_map,
+                cutout_success_map=cutout_success_map,
+                cutouts_enabled=cutouts_enabled,
+                band_dict=all_band_dict,
             )
-        except Exception as e:
-            logger.error(f'Error during download: {e}')
-            raise
-
-        if (
-            not catalog.empty
-            and cfg.cutouts.mode != 'disabled'
-            and cfg.inputs.source in ['coordinates', 'table']
-        ):
-            successful_tiles = set(tile_cutout_info.keys())
-
-            # Add cutout_created flag
-            catalog['cutout_created'] = catalog['tile'].isin(successful_tiles).astype(int)
+            # Cleanup: remove bands_to_process column if it exists
+            catalog = clean_process_columns(catalog)
 
             # Save augmented catalog
-            if cfg.inputs.source == 'table':
-                input_name = cfg.inputs.table.path.stem
-            else:
-                input_name = 'input_coordinates'
-            catalog_path = cfg.paths.dir_tables / f'{input_name}_augmented.csv'
             catalog.to_csv(catalog_path, index=False)
             logger.info(f'Saved augmented catalog to {catalog_path}')
+
+    # Report download summary
+    report_download_summary(
+        download_stats=download_stats,
+        cutout_stats=cutout_stats,
+        cutouts_enabled=cutouts_enabled,
+        cutout_mode=cutout_mode,
+    )
 
     end = time.time()
     elapsed = end - start
@@ -494,7 +577,6 @@ def run_plot(args: argparse.Namespace) -> None:
             sys.exit(1)
         # Extract catalog name from path (remove _augmented.csv suffix)
         catalog_name = catalog_path.stem.replace('_augmented', '')
-        logger.info(f'Auto-detected catalog: {catalog_name}')
 
     catalog_path = table_dir / f'{catalog_name}_augmented.csv'
 

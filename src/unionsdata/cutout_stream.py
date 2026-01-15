@@ -29,12 +29,12 @@ from rich.progress import (
 from unionsdata.config import BandDict
 from unionsdata.cutouts import (
     analyze_existing_file,
-    get_wavelength_order,
     match_objects_by_coords,
     merge_bands_into_h5,
     write_to_h5,
 )
 from unionsdata.download import make_session, tile_band_specs
+from unionsdata.utils import get_wavelength_order
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,7 @@ def build_cutout_queries(
     catalog: pd.DataFrame,
     cutout_size: int,
     band_dict: dict[str, BandDict],
+    bands: list[str],
     image_limit: int = 10000,
 ) -> pd.DataFrame:
     """
@@ -126,6 +127,7 @@ def build_cutout_queries(
         catalog: DataFrame with 'x', 'y' pixel coordinates (1-based)
         cutout_size: Square cutout size in pixels
         band_dict: Band configuration (needed for fits_ext per band)
+        bands: List of requested bands
         image_limit: Image dimensions (default 10000x10000)
 
     Returns:
@@ -156,32 +158,39 @@ def build_cutout_queries(
     catalog['pad_x'] = np.clip(x1 - x1_raw, 0, None).astype(np.int32)
     catalog['pad_y'] = np.clip(y1 - y1_raw, 0, None).astype(np.int32)
 
-    # Valid if cutout overlaps with image at all
-    valid = (x1_raw < image_limit) & (x2_raw > 0) & (y1_raw < image_limit) & (y2_raw > 0)
+    # Geometrically valid if cutout overlaps with image at all
+    geo_valid = (x1_raw < image_limit) & (x2_raw > 0) & (y1_raw < image_limit) & (y2_raw > 0)
 
     # Build query string for each band (different fits_ext)
-    for band, cfg in band_dict.items():
-        ext = cfg['fits_ext']
-        query_strings = (
-            '?SUB=['
-            + str(ext)
-            + ']['
-            + x1.astype(str)
-            + ':'
-            + x2.astype(str)
-            + ','
-            + y1.astype(str)
-            + ':'
-            + y2.astype(str)
-            + ']'
-        )
+    for band in bands:
+        ext = band_dict[band]['fits_ext']
+        needs_band = np.array([band in instruction for instruction in catalog['bands_to_cutout']])
+        final_mask = geo_valid & needs_band
+
         # Initialize with None for invalids
         queries = np.full(len(catalog), None, dtype=object)
-        # Fill valid entries
-        queries[valid] = query_strings[valid]
+
+        if final_mask.any():
+            query_strings = (
+                '?SUB=['
+                + str(ext)
+                + ']['
+                + x1.astype(str)
+                + ':'
+                + x2.astype(str)
+                + ','
+                + y1.astype(str)
+                + ':'
+                + y2.astype(str)
+                + ']'
+            )
+
+            # Fill valid entries
+            queries[final_mask] = query_strings[final_mask]
+
         catalog[f'cutout_query_{band}'] = queries
 
-    n_invalid = (~valid).sum()
+    n_invalid = (~geo_valid).sum()
     if n_invalid > 0:
         logger.warning(f'{n_invalid} objects outside image bounds will be skipped')
 
@@ -361,8 +370,10 @@ def stream_direct_cutouts(
     cert_path: Path,
     max_retries: int,
     n_workers: int,
+    cutout_stats: dict[str, int],
+    cutout_success_map: dict[str, set[str]],
     batch_size: int = 500,
-) -> tuple[int, int, int, set[str]]:
+) -> None:
     """
     Stream cutouts directly from VOSpace.
 
@@ -382,44 +393,44 @@ def stream_direct_cutouts(
         cert_path: Path to SSL certificate for requests
         max_retries: Max retries for failed downloads
         n_workers: Number of parallel download threads
+        cutout_stats: Dict to update with cutout statistics
+        cutout_success_map: Dict to update with successful cutout bands per object
         batch_size: Number of objects to process per batch
 
     Returns:
-        Tuple of (n_new, n_updated, n_skipped, successful_object_ids)
+        None
     """
     if catalog.empty:
-        return 0, 0, 0, set()
+        return
 
     # Sort catalog by tile for efficiency
     catalog = catalog.sort_values(by='tile').reset_index(drop=True)
 
     bands = get_wavelength_order(bands, band_dict)
-    catalog = build_cutout_queries(catalog, cutout_size, band_dict)
+    catalog = build_cutout_queries(catalog, cutout_size, band_dict, bands)
 
     # Filter invalid
-    query_cols = [f'cutout_query_{b}' for b in bands]
-    valid_mask = catalog[query_cols].notna().any(axis=1)
-    n_invalid_coords = int((~valid_mask).sum())
-    catalog = catalog[valid_mask].reset_index(drop=True)
+    query_cols = [f'cutout_query_{b}' for b in bands if f'cutout_query_{b}' in catalog.columns]
+
+    if query_cols:
+        # Keep row if at least one of the required bands has a valid query
+        valid_mask = catalog[query_cols].notna().any(axis=1)
+        n_invalid_coords = int((~valid_mask).sum())
+        catalog = catalog[valid_mask].reset_index(drop=True)
+    else:
+        # Should not happen if bands list is valid
+        cutout_stats['skipped'] += len(catalog)
+        return
 
     if catalog.empty:
         logger.warning('No valid cutouts after filtering')
-        return 0, 0, n_invalid_coords, set()
-
-    # Availability check
-    total_available = check_cutout_availability(catalog, bands)
-
-    if total_available == 0:
-        logger.warning('No cutouts available to download.')
-        return 0, 0, n_invalid_coords, set()
+        cutout_stats['skipped'] += n_invalid_coords
+        return
 
     # Initialize counters
     total_new = 0
     total_updated = 0
     total_skipped = n_invalid_coords
-
-    # Set of successfully downloaded object IDs
-    successful_object_ids: set[str] = set()
 
     # Shared state for all batches
     job_queue: Queue[CutoutJob | None] = Queue()
@@ -427,7 +438,8 @@ def stream_direct_cutouts(
     results_lock = Lock()
     shutdown = Event()
     stats = StreamingStats()
-    n_workers = min(n_workers, total_available)
+    total_tasks = int(catalog[query_cols].notna().sum().sum())
+    n_workers = min(n_workers, max(1, total_tasks))
 
     # Create workers once and reuse across all batches
     workers = [
@@ -453,18 +465,22 @@ def stream_direct_cutouts(
         w.start()
 
     jobs_queued = 0
-    has_availability = 'bands' in catalog.columns
 
     try:
         with Progress(
             SpinnerColumn(),
-            TextColumn('[bold blue]Streaming cutouts'),
-            BarColumn(),
+            TextColumn('[bold blue]{task.description}'),
+            BarColumn(bar_width=None),
+            TextColumn('[progress.percentage]{task.percentage:>3.0f}%'),
+            '•',
             MofNCompleteColumn(),
+            '•',
             TimeElapsedColumn(),
+            '•',
             TimeRemainingColumn(),
+            transient=False,
         ) as progress:
-            task = progress.add_task('', total=total_available)
+            task = progress.add_task('Streaming cutouts', total=total_tasks)
 
             for batch_start in range(0, len(catalog), batch_size):
                 if shutdown.is_set():
@@ -479,15 +495,11 @@ def stream_direct_cutouts(
                 for _, row in chunk.iterrows():
                     tile_parts = str(row['tile']).split('_')
                     tile = (int(tile_parts[0]), int(tile_parts[1]))
-                    row_available_bands = row['bands'] if has_availability else bands
 
                     for band in bands:
-                        # Skip if not available
-                        if has_availability and band not in row_available_bands:
-                            continue
+                        col_name = f'cutout_query_{band}'
 
-                        query = row[f'cutout_query_{band}']
-                        if query is not None:
+                        if col_name in row and pd.notna(row[col_name]):
                             job_queue.put(
                                 CutoutJob(
                                     object_id=str(row['ID']),
@@ -495,7 +507,7 @@ def stream_direct_cutouts(
                                     band=band,
                                     ra=float(row['ra']),
                                     dec=float(row['dec']),
-                                    cutout_query=query,
+                                    cutout_query=row[col_name],
                                     pad_x=int(row['pad_x']),
                                     pad_y=int(row['pad_y']),
                                 )
@@ -517,12 +529,6 @@ def stream_direct_cutouts(
                 for tile_key in chunk['tile'].unique():
                     tile_chunk = chunk[chunk['tile'] == tile_key]
 
-                    # Record successful IDs
-                    batch_success_ids = [
-                        str(obj_id) for obj_id in tile_chunk['ID'] if str(obj_id) in results
-                    ]
-                    successful_object_ids.update(batch_success_ids)
-
                     n_n, n_u, n_s = save_results_by_tile(
                         results=results,
                         catalog=tile_chunk,
@@ -535,6 +541,12 @@ def stream_direct_cutouts(
                     total_new += n_n
                     total_updated += n_u
                     total_skipped += n_s
+
+                # Update success map
+                for obj_id_str, bands_data in results.items():
+                    if obj_id_str not in cutout_success_map:
+                        cutout_success_map[obj_id_str] = set()
+                    cutout_success_map[obj_id_str].update(bands_data.keys())
 
                 # Clear results for next batch
                 with results_lock:
@@ -551,15 +563,11 @@ def stream_direct_cutouts(
     for w in workers:
         w.join(timeout=5.0)
 
-    logger.info('=' * 70)
-    logger.info('CUTOUT STREAM SUMMARY')
-    logger.info(f'  ✨ New: {total_new}')
-    logger.info(f'  🔄 Updated: {total_updated}')
-    logger.info(f'  ⏭️  Skipped: {total_skipped}')
-    logger.info(f'  ❌ Download Failures: {stats.failed}')
-    logger.info('=' * 70)
-
-    return total_new, total_updated, total_skipped, successful_object_ids
+    # Update stats
+    cutout_stats['new'] += total_new
+    cutout_stats['updated'] += total_updated
+    cutout_stats['skipped'] += total_skipped
+    cutout_stats['failed'] += stats.failed
 
 
 def save_results_by_tile(
@@ -616,13 +624,32 @@ def save_results_by_tile(
                     arr[i, j] = obj_res[b]
         return arr
 
+    def count_ops(df: pd.DataFrame, target_bands: list[str]) -> int:
+        """Helper to count how many object-band cutouts were processed in this batch.
+        Args:
+            df: DataFrame of objects to include
+            target_bands: Bands to check for existence
+        Returns:
+            Count of object-band cutouts present in results
+        """
+        count = 0
+        # Iterate through every object in this batch (chunk)
+        for row in df.itertuples():
+            # results = {'Obj1': {'r': array(...), 'i': array(...)}}
+            obj_res = results.get(str(row.ID), {})
+            # Count how many of the 'target_bands' exist for this object
+            count += sum(1 for b in target_bands if b in obj_res)
+
+        return count
+
     existing_info = analyze_existing_file(output_path)
 
     # Case 1: new file
     if not existing_info.exists:
         data = get_data_array(tile_catalog, bands)
         write_to_h5(output_path, data, tile_catalog, bands, tile_key, band_dict)
-        return len(tile_catalog), 0, 0
+        ops_count = count_ops(tile_catalog, bands)
+        return ops_count, 0, 0
 
     # Case 2: existing file (update/append)
     # Determine new vs existing bands
@@ -636,8 +663,10 @@ def save_results_by_tile(
     is_match, match_idx = match_objects_by_coords(cat_coords, existing_info.object_coords)
 
     n_new = int((~is_match).sum())
-    n_updated = 0
-    n_skipped = 0
+
+    ops_new = 0
+    ops_updated = 0
+    ops_skipped = 0
 
     # A. Update matched objects (add new bands if available)
     if is_match.any():
@@ -648,9 +677,9 @@ def save_results_by_tile(
             merge_bands_into_h5(
                 output_path, new_data, new_bands, existing_info, match_idx[is_match], band_dict
             )
-            n_updated = len(matched_df)
+            ops_updated = count_ops(matched_df, new_bands)
         else:
-            n_skipped = int(is_match.sum())
+            ops_skipped = 0
 
     # B. Append completely new objects (write all bands)
     if n_new > 0:
@@ -658,4 +687,6 @@ def save_results_by_tile(
         data = get_data_array(new_df, bands)
         write_to_h5(output_path, data, new_df, bands, tile_key, band_dict)
 
-    return n_new, n_updated, n_skipped
+        ops_new = count_ops(new_df, bands)
+
+    return ops_new, ops_updated, ops_skipped

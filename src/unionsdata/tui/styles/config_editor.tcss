@@ -322,3 +322,10 @@ CollapsibleTitle {
 .error-border {
     border: tall heavy $error;
 }
+
+.inline-field-warning {
+    color: $warning;
+    margin-left: 2;
+    height: 100%;
+    content-align: left middle;
+}

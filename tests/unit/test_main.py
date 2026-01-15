@@ -99,8 +99,6 @@ def test_build_cli_overrides_odd_number_tiles_raises_error():
     )
 
     # ACT & ASSERT
-    from unionsdata.main import build_cli_overrides
-
     with pytest.raises(ValueError, match='Tiles must be provided as pairs'):
         build_cli_overrides(args)
 

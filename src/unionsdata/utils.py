@@ -5,7 +5,7 @@ import subprocess
 import time
 from itertools import combinations
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import h5py
 import numpy as np
@@ -21,6 +21,12 @@ from unionsdata.config import BandDict, InputsCfg
 from unionsdata.kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 
 logger = logging.getLogger(__name__)
+
+
+class ProcessingStats(TypedDict):
+    skipped_tile_bands: list[tuple[str, str]]
+    rejected_operations: int
+    skipped_operations: int
 
 
 class TileAvailability:
@@ -178,7 +184,8 @@ class TileAvailability:
 
 
 def tile_finder(
-    avail: TileAvailability,
+    avail_all: TileAvailability,
+    avail_sel: TileAvailability,
     all_unique_tiles: list[tuple[int, int]],
     catalog: pd.DataFrame | None,
     coord_c: SkyCoord | None,
@@ -189,7 +196,8 @@ def tile_finder(
     Finds tiles a list of objects are in.
 
     Args:
-        avail: object to retrieve available tiles
+        avail_all: object to retrieve all available tiles and their bands for all bands
+        avail_sel: object to retrieve all available tiles and their bands for selected bands
         all_unique_tiles: list of all unique tiles available
         catalog: object catalog
         coord_c: astropy SkyCoord object of the coordinates
@@ -210,8 +218,9 @@ def tile_finder(
 
     tiles_matching_catalog = np.empty(len(catalog), dtype=object)
     pix_coords = np.empty((len(catalog), 2), dtype=np.float64)
-    bands = np.empty(len(catalog), dtype=object)
-    n_bands = np.empty(len(catalog), dtype=np.int32)
+    bands_available = np.empty(len(catalog), dtype=object)
+    n_bands_available = np.empty(len(catalog), dtype=np.int32)
+
     for i, obj_coord in enumerate(coord_c):
         assert obj_coord is not None
         tile_numbers = query_tree(
@@ -221,14 +230,14 @@ def tile_finder(
         )
         tiles_matching_catalog[i] = tile_numbers
         # check how many bands are available for this tile
-        bands_tile, band_idx_tile = avail.get_availability(tile_numbers)
-        bands[i], n_bands[i] = bands_tile, len(band_idx_tile)
+        bands_tile, band_idx_tile = avail_all.get_availability(tile_numbers)
+        bands_available[i], n_bands_available[i] = ','.join(bands_tile), len(band_idx_tile)
         if len(bands_tile) == 0:
             logger.warning(
                 f'Object at ({obj_coord.ra.deg:.4f}, {obj_coord.dec.deg:.4f}) '
                 f'is in tile {tile_numbers} which has no requested bands'
             )
-            bands[i] = []
+            bands_available[i] = []
             pix_coords[i] = np.nan, np.nan
             continue
         wcs = TileWCS()
@@ -240,11 +249,11 @@ def tile_finder(
     catalog['tile'] = [tile_str(tile) for tile in tiles_matching_catalog]
     catalog['x'] = np.round(pix_coords[:, 0], 4)
     catalog['y'] = np.round(pix_coords[:, 1], 4)
-    catalog['bands'] = bands
-    catalog['n_bands'] = n_bands
+    catalog['bands_available'] = bands_available
+    catalog['n_bands_available'] = n_bands_available
     unique_tiles = list(set(tiles_matching_catalog.tolist()))
     tiles_x_bands = [
-        tile for tile in unique_tiles if len(avail.get_availability(tile)[1]) >= band_constr
+        tile for tile in unique_tiles if len(avail_sel.get_availability(tile)[1]) >= band_constr
     ]
 
     return unique_tiles, tiles_x_bands, catalog
@@ -489,7 +498,7 @@ def import_tiles(
         ValueError: provide two three digit numbers for each tile
 
     Returns:
-        list: list of tiles that are available in r and at least two other bands
+        list: list of tiles that are available in at least band_constr bands
     """
     logger.info(f'Tiles read from config file: {tiles}')
 
@@ -497,7 +506,8 @@ def import_tiles(
 
 
 def input_to_tile_list(
-    availability: TileAvailability,
+    avail_all: TileAvailability,
+    avail_sel: TileAvailability,
     all_unique_tiles: list[tuple[int, int]],
     band_constr: int,
     inputs: InputsCfg,
@@ -510,7 +520,8 @@ def input_to_tile_list(
     Process the input to get a list of tiles that are available in r and at least two other bands.
 
     Args:
-        availability: instance of the TileAvailability class
+        avail_all: instance of the TileAvailability class for all bands
+        avail_sel: instance of the TileAvailability class for selected bands
         all_unique_tiles: list of all unique tiles available
         band_constr: minimum number of bands that should be available
         inputs: input dictionary with coordinates, a table, or tiles
@@ -544,7 +555,7 @@ def input_to_tile_list(
     elif source == 'tiles':
         return (
             None,
-            import_tiles(inputs.tiles, availability, band_constr),
+            import_tiles(inputs.tiles, avail_sel, band_constr),
             pd.DataFrame(),
         )
     else:
@@ -552,7 +563,7 @@ def input_to_tile_list(
         return None, None, pd.DataFrame()
 
     unique_tiles, tiles_x_bands, catalog = tile_finder(
-        availability, all_unique_tiles, catalog, coord_c, tile_info_dir, band_constr
+        avail_all, avail_sel, all_unique_tiles, catalog, coord_c, tile_info_dir, band_constr
     )
 
     return unique_tiles, tiles_x_bands, catalog
@@ -680,3 +691,510 @@ def get_bands_short_string(bands: list[str], band_dict: dict[str, BandDict]) -> 
         Concatenated band letters (e.g., 'gri')
     """
     return ''.join(band_dict[b]['band'] for b in bands)
+
+
+def load_existing_catalog(inputs: InputsCfg, tables_dir: Path) -> tuple[pd.DataFrame | None, Path]:
+    """
+    Load catalog from previous run if it exists.
+
+    Args:
+        inputs: Input configuration
+        tables_dir: Directory where tables are stored
+
+    Returns:
+         Tuple containing DataFrame with existing catalog (or None if not found) and the path to the catalog file
+    """
+    if inputs.source == 'table':
+        input_name = inputs.table.path.stem
+    elif inputs.source == 'coordinates':
+        input_name = 'input_coordinates'
+    else:
+        return None, Path()
+
+    existing_path = tables_dir / f'{input_name}_augmented.csv'
+
+    if not existing_path.exists():
+        return None, existing_path
+
+    try:
+        catalog_existing = pd.read_csv(
+            existing_path, dtype={'cutout_bands': str, 'bands_downloaded': str}
+        )
+
+        catalog_existing['cutout_bands'] = catalog_existing['cutout_bands'].fillna('')
+        catalog_existing['bands_downloaded'] = catalog_existing['bands_downloaded'].fillna('')
+        # drop these columns since they will be re-computed
+        cols_to_drop = ['bands_available', 'n_bands_available', 'x', 'y', 'tile']
+        catalog_existing.drop(
+            columns=[c for c in cols_to_drop if c in catalog_existing.columns], inplace=True
+        )
+
+        logger.debug(
+            f'Loaded existing augmented catalog history for {len(catalog_existing)} objects'
+        )
+        return catalog_existing, existing_path
+
+    except Exception as e:
+        logger.warning(f'Failed to load existing catalog: {e}. Starting fresh.')
+        return None, existing_path
+
+
+def merge_w_existing_catalog(
+    fresh_catalog: pd.DataFrame,
+    existing_catalog: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """
+    Merge fresh catalog data with existing augmented catalog.
+
+    Preserves cutout_bands from existing catalog for matching IDs.
+    New objects get empty cutout_bands.
+    Objects removed from fresh catalog are dropped.
+
+    Args:
+        fresh_catalog: Newly processed catalog with tile/coord info
+        existing_catalog: Previously saved augmented catalog (or None)
+
+    Returns:
+        Merged catalog with preserved cutout history
+    """
+    if existing_catalog is not None and not fresh_catalog.empty:
+        fresh_catalog = fresh_catalog.merge(
+            existing_catalog[['ID', 'bands_downloaded', 'cutout_bands']], on='ID', how='left'
+        )
+        logger.debug(f'Merged input with previous run; now {len(fresh_catalog)} total objects')
+    for col in ['cutout_bands', 'bands_downloaded']:
+        if col not in fresh_catalog.columns:
+            fresh_catalog[col] = ''  # Create missing column
+        else:
+            fresh_catalog[col] = fresh_catalog[col].fillna('')  # Fix merge artifacts
+
+    return fresh_catalog
+
+
+def compute_bands_to_process(
+    catalog: pd.DataFrame,
+    bands: list[str],
+    existing_col: str,
+    output_col: str,
+    require_all: bool = False,
+) -> tuple[pd.DataFrame, ProcessingStats]:
+    """
+    Compute which bands need processing for each object.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        bands: List of bands to check for processing
+        existing_col: Column name indicating already processed bands
+        output_col: Column name to store bands needing processing
+        require_all: If True, skip objects missing required bands in 'bands_available'
+
+    Returns:
+        Tuple of (catalog with new column, stats dict)
+    """
+    catalog = catalog.copy()
+    req_bands_set = set(bands)
+
+    stats: ProcessingStats = {
+        'skipped_tile_bands': [],
+        'skipped_operations': 0,
+        'rejected_operations': 0,
+    }
+
+    def get_bands_to_process(row: pd.Series) -> list[str]:
+        # Parse available bands
+        val_avail = row['bands_available']
+        available = set(str(val_avail).split(',')) if pd.notna(val_avail) and val_avail else set()
+        available.discard('')
+
+        # Check require_all constraint
+        if require_all and not req_bands_set.issubset(available):
+            potential = req_bands_set & available
+
+            stats['rejected_operations'] += len(potential)
+
+            return []
+
+        # Parse existing bands
+        val_existing = row[existing_col]
+        existing = (
+            set(str(val_existing).split(',')) if pd.notna(val_existing) and val_existing else set()
+        )
+        existing.discard('')
+
+        # Compute what's needed
+        potential = req_bands_set & available
+        done = potential & existing
+
+        if done:
+            count = len(done)
+            stats['skipped_operations'] += count  # Raw count (for cutouts)
+
+            # Record tile info (for download deduplication)
+            for band in done:
+                stats['skipped_tile_bands'].append((row['tile'], band))
+
+        return list(potential - existing)
+
+    catalog[output_col] = catalog.apply(get_bands_to_process, axis=1)
+    return catalog, stats
+
+
+def filter_for_processing(
+    catalog: pd.DataFrame,
+    bands: list[str],
+    download_col: str,
+    cutout_col: str,
+    require_all: bool,
+    cutouts_enabled: bool,
+    download_stats: dict[str, int],
+    cutout_stats: dict[str, int],
+) -> pd.DataFrame | None:
+    """
+    Filter catalog to objects needing either downloads or cutouts.
+
+    Creates two columns:
+        - 'bands_to_download': bands needing tile download
+        - 'bands_to_cutout': bands needing cutout creation
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        bands: List of requested bands
+        download_col: Column tracking downloaded bands
+        cutout_col: Column tracking cutout bands
+        require_all: If True, skip objects missing required bands
+        cutouts_enabled: Whether to compute cutout requirements
+        download_stats: Dictionary to track download statistics
+        cutout_stats: Dictionary to track cutout statistics
+
+    Returns:
+        Filtered catalog
+    """
+    # Compute download requirements
+    catalog, dl_stats = compute_bands_to_process(
+        catalog=catalog,
+        bands=bands,
+        existing_col=download_col,
+        output_col='bands_to_download',
+        require_all=require_all,
+    )
+    download_stats['skipped'] = len(set(dl_stats['skipped_tile_bands']))
+    download_stats['rejected'] += dl_stats['rejected_operations']
+
+    # Compute cutout requirements (if enabled)
+    if cutouts_enabled:
+        catalog, cut_stats = compute_bands_to_process(
+            catalog=catalog,
+            bands=bands,
+            existing_col=cutout_col,
+            output_col='bands_to_cutout',
+            require_all=require_all,
+        )
+        cutout_stats['skipped'] += cut_stats['skipped_operations']
+        cutout_stats['rejected'] += cut_stats['rejected_operations']
+    else:
+        catalog['bands_to_cutout'] = [[] for _ in range(len(catalog))]
+
+    # Filter: keep rows that need EITHER downloads OR cutouts
+    needs_work = (catalog['bands_to_download'].map(len) > 0) | (
+        catalog['bands_to_cutout'].map(len) > 0
+    )
+    filtered_catalog = catalog[needs_work].reset_index(drop=True)
+
+    # Logging
+    n_need_download = (catalog['bands_to_download'].map(len) > 0).sum()
+    n_need_cutout = (catalog['bands_to_cutout'].map(len) > 0).sum()
+
+    logger.debug(f'Processing requirements for bands {bands}:')
+    logger.debug(f'  Objects needing downloads: {n_need_download}/{len(catalog)}')
+    logger.debug(f'  Objects needing cutouts:   {n_need_cutout}/{len(catalog)}')
+    logger.debug(f'  Download tasks skipped:    {download_stats["skipped"]}')
+    logger.debug(f'  Cutout tasks skipped:      {cutout_stats["skipped"]}')
+
+    if filtered_catalog.empty:
+        return None
+
+    return filtered_catalog
+
+
+def update_catalog(
+    catalog: pd.DataFrame,
+    successful_bands_map: dict[str, set[str]],
+    band_dict: dict[str, BandDict],
+    col_name: str = 'cutout_bands',
+) -> pd.DataFrame:
+    """
+    Update catalog for successfully processed objects.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        successful_bands_map: Dictionary mapping object IDs to sets of successfully processed bands
+        band_dict: Dictionary of band information
+
+    Returns:
+        Updated catalog with merged cutout_bands
+    """
+    catalog = catalog.copy()
+
+    id_to_update = set(successful_bands_map.keys())
+    # create boolean mask for rows to update
+    mask = catalog['ID'].astype(str).isin(id_to_update)
+
+    # early return if no rows to update
+    if not mask.any():
+        return catalog
+
+    def merge_bands(row: pd.Series) -> str:
+        obj_id = str(row['ID'])
+
+        # get existing bands
+        existing_str = row[col_name] if pd.notna(row[col_name]) else ''
+        existing = set(existing_str.split(','))
+        existing.discard('')
+
+        # get new bands
+        new_bands = successful_bands_map[obj_id]
+
+        # merge
+        updated_bands = existing | new_bands
+
+        # sort by wavelength
+        updated_bands_sorted = get_wavelength_order(
+            bands=list(updated_bands), band_dictionary=band_dict
+        )
+
+        return ','.join(updated_bands_sorted)
+
+    # apply merge only to rows needing update
+    catalog.loc[mask, col_name] = catalog.loc[mask].apply(merge_bands, axis=1)
+
+    return catalog
+
+
+def update_bands_downloaded(
+    catalog: pd.DataFrame,
+    tile_progress: dict[str, set[str]],
+    band_dict: dict[str, BandDict],
+) -> pd.DataFrame:
+    """
+    Update 'bands_downloaded' column based on tile-level success.
+
+    Since FITS files are per-tile, if a tile is downloaded, we mark
+    ALL objects in that tile as having those bands.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        tile_progress: Dictionary mapping tile keys to sets of successfully downloaded bands
+        band_dict: Dictionary of band information
+
+    Returns:
+        Updated catalog DataFrame
+    """
+    if catalog.empty or not tile_progress:
+        return catalog
+
+    # Filter to only successful tiles
+    successful_tiles = {t: b for t, b in tile_progress.items() if b}
+
+    if not successful_tiles:
+        return catalog
+
+    logger.debug(f"Updating 'bands_downloaded' for {len(successful_tiles)} tiles...")
+
+    for tile_key, new_bands_set in successful_tiles.items():
+        # Identify rows belonging to this tile
+        mask = catalog['tile'] == tile_key
+
+        if not mask.any():
+            continue
+
+        # Define the update logic for this specific tile
+        def _update_row(existing_val: str, bands: set[str] = new_bands_set) -> str:
+            existing_str = existing_val if pd.notna(existing_val) else ''
+            existing_set = set(existing_str.split(','))
+            existing_set.discard('')
+
+            # Merge & Sort
+            updated_set = existing_set | bands
+            return ','.join(get_wavelength_order(list(updated_set), band_dict))
+
+        # Apply update to just this slice
+        catalog.loc[mask, 'bands_downloaded'] = catalog.loc[mask, 'bands_downloaded'].apply(
+            _update_row
+        )
+
+    return catalog
+
+
+def process_download_results(
+    catalog: pd.DataFrame,
+    tile_progress: dict[str, set[str]],
+    cutout_success_map: dict[str, set[str]],
+    cutouts_enabled: bool,
+    band_dict: dict[str, BandDict],
+) -> pd.DataFrame:
+    """
+    Process results from download_tiles and update catalog columns.
+    Delegates to specialized functions for different column types.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        tile_progress: Dictionary mapping tile keys to sets of successfully downloaded bands
+        cutout_success_map: Dictionary mapping object IDs to sets of successfully cutout bands
+        cutouts_enabled: Whether cutouts were enabled
+        band_dict: Dictionary of band information
+
+    Returns:
+        Updated catalog DataFrame
+    """
+    if catalog.empty:
+        return catalog
+
+    logger.debug('Updating catalog state...')
+
+    # Update 'bands_downloaded'
+    if tile_progress:
+        catalog = update_bands_downloaded(
+            catalog=catalog, tile_progress=tile_progress, band_dict=band_dict
+        )
+
+    # Update 'cutout_bands'
+    if cutouts_enabled and cutout_success_map:
+        logger.debug(f"Updating 'cutout_bands' for {len(cutout_success_map)} objects...")
+
+        catalog = update_catalog(
+            catalog=catalog,
+            successful_bands_map=cutout_success_map,
+            band_dict=band_dict,
+            col_name='cutout_bands',
+        )
+
+    return catalog
+
+
+def get_wavelength_order(bands: list[str], band_dictionary: dict[str, BandDict]) -> list[str]:
+    """
+    Sort bands by wavelength order using the band dictionary's key order.
+
+    The band dictionary keys are ordered from shortest to longest wavelength
+    (u -> g -> r -> i -> z), so we filter and sort by that canonical order.
+
+    Args:
+        bands: List of band names to sort
+        band_dictionary: Full band configuration dictionary (defines wavelength order)
+
+    Returns:
+        Bands sorted by wavelength (shortest to longest)
+    """
+    canonical_order = list(band_dictionary.keys())
+    return [b for b in canonical_order if b in bands]
+
+
+def filter_catalog_all_bands(
+    catalog: pd.DataFrame,
+    required_bands: set[str],
+    col_name: str = 'cutout_bands',
+) -> pd.DataFrame:
+    """
+    Filter catalog to only include objects that have all required bands available.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+        required_bands: Set of bands that must be available for an object to be included
+        col_name: Column name in catalog indicating available bands. Defaults to 'cutout_bands'.
+
+    Returns:
+        Filtered catalog DataFrame
+    """
+    if catalog.empty:
+        return catalog
+
+    def has_all_bands(row: pd.Series) -> bool:
+        val = row[col_name]
+        available = set(str(val).split(',')) if pd.notna(val) and val else set()
+        available.discard('')
+        return required_bands.issubset(available)
+
+    filtered_catalog = catalog[catalog.apply(has_all_bands, axis=1)].reset_index(drop=True)
+
+    logger.debug(
+        f'Filtered catalog for objects with all required bands {required_bands}: '
+        f'{len(filtered_catalog)}/{len(catalog)} objects remain.'
+    )
+
+    return filtered_catalog
+
+
+def jobs_from_catalog(catalog: pd.DataFrame) -> set[tuple[tuple[int, int], str]]:
+    """Get (tile, band) combinations from augmented input catalog that should be downloaded.
+
+    Args:
+        catalog: Augmented input catalog with 'tile' and 'bands_to_download' columns
+
+    Returns:
+        Set of (tile, band) tuples that need to be downloaded
+    """
+    needed_jobs = set()
+    for tile_str, group in catalog.groupby('tile'):
+        t_parts = str(tile_str).split('_')
+        t_tuple = (int(t_parts[0]), int(t_parts[1]))
+
+        unique_bands_for_tile = set()
+        for bands_list in group['bands_to_download']:
+            unique_bands_for_tile.update(bands_list)
+
+        for b in unique_bands_for_tile:
+            needed_jobs.add((t_tuple, b))
+
+    return needed_jobs
+
+
+def jobs_from_tiles(
+    tiles: list[tuple[int, int]], bands: list[str], avail: TileAvailability, require_all: bool
+) -> set[tuple[tuple[int, int], str]]:
+    """Get (tile, band) combinations that should be downloaded.
+
+    Args:
+        tiles: List of tile numbers
+        bands: List of requested bands
+        avail: TileAvailability object
+        require_all: Whether all bands are required for processing
+
+    Returns:
+        Set of (tile, band) tuples that need to be downloaded
+    """
+
+    needed_jobs = set()
+    req_tiles = set(tiles)
+
+    if require_all:
+        logger.info(f'Requiring all specified bands: {bands}')
+        tiles_to_process = set(avail.get_tiles_for_bands(bands)) & req_tiles
+
+        for band in bands:
+            for tile in tiles_to_process:
+                needed_jobs.add((tile, band))
+    else:
+        logger.info(f'Requiring any of the specified bands: {bands}')
+        for band in bands:
+            tiles_to_process = set(avail.band_tiles(band)) & req_tiles
+
+            for tile in tiles_to_process:
+                needed_jobs.add((tile, band))
+
+    return needed_jobs
+
+
+def clean_process_columns(catalog: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove temporary processing columns from the catalog.
+
+    Args:
+        catalog: Augmented catalog DataFrame
+
+    Returns:
+        Cleaned catalog DataFrame
+    """
+    temp_cols = ['bands_to_download', 'bands_to_cutout']
+    catalog_cleaned = catalog.drop(columns=[col for col in temp_cols if col in catalog.columns])
+
+    return catalog_cleaned

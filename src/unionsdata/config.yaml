@@ -16,7 +16,7 @@ logging:
 runtime:
   n_download_threads: 24
   n_cutout_processes: 2
-  bands: ['cfis-u', 'cfis_lsb-r', 'ps-i']                              # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ['cfis-u', 'cfis_lsb-r', 'cfis-r', 'ps-i', 'wishes-z']                  # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
@@ -27,14 +27,14 @@ tiles:
   require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
 cutouts:
-  mode: "direct_only"                                              # disabled | after_download | direct_only
+  mode: "after_download"                                              # disabled | after_download | direct_only
   size_pix: 512                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
   enable: true                                                     # create plots of cutouts
   catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
-  bands: ['cfis-u', 'cfis_lsb-r', 'ps-i']                              # bands to use for RGB cutouts; null = first 3 from runtime.bands
+  bands: ['cfis-u', 'cfis_lsb-r', 'cfis-r', 'ps-i', 'wishes-z']                  # bands to use for RGB cutouts; null = first 3 from runtime.bands
   size_pix: 512                                                    # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode
@@ -59,11 +59,10 @@ plotting:
 
 inputs:
   # Choose the input source
-  source: "table"                                              # all_available | tiles | coordinates | table
+  source: "tiles"                                                  # all_available | tiles | coordinates | table
   # Pairs: [[x1, y1], [x2, y2], ...]
   tiles:
     - [268, 277]
-    - [269, 277]
     - [274, 275]
 
   # Pairs: [[ra1, dec1], [ra2, dec2], ...]
@@ -72,7 +71,7 @@ inputs:
     - [231.4445, 52.4447]
 
   table:
-    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"  # CSV with RA/Dec/ID columns
+    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name

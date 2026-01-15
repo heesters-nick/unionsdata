@@ -794,6 +794,15 @@ class ConfigEditorApp(App[None]):
                     classes='field-input',
                 )
 
+                # Warning for direct only mode limitations
+                yield Label(
+                    '⚠️  Currently, direct cutout download is not supported for the bands WHIGS-g and WISHES-z.',
+                    id='cutout-mode-warning',
+                    classes='inline-field-warning'
+                    if current_mode == 'direct_only'
+                    else 'inline-field-warning hidden',
+                )
+
             with Vertical(
                 id='cutout-options-container',
                 classes='' if current_mode != 'disabled' else 'hidden',
@@ -1322,6 +1331,13 @@ class ConfigEditorApp(App[None]):
                     container.add_class('hidden')
                 else:
                     container.remove_class('hidden')
+
+                # Warning message for direct cutout mode
+                warning = self.query_one('#cutout-mode-warning')
+                if event.value == 'direct_only':
+                    warning.remove_class('hidden')
+                else:
+                    warning.add_class('hidden')
             except Exception:
                 pass
         elif event.select.id == 'plot-mode':
