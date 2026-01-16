@@ -661,9 +661,14 @@ def check_cert_expiry(cert_path: Path, days_warning: int = 1) -> None:
     Returns:
         None
     """
-
-    with open(cert_path, 'rb') as f:
-        cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+    try:
+        with open(cert_path, 'rb') as f:
+            cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+    except (ValueError, OSError) as e:
+        # ValueError: Invalid PEM format
+        # OSError: Permission denied / IO error
+        logger.error(f'Invalid or inaccessible certificate at {cert_path}: {e}')
+        raise ValueError('Certificate validation failed') from e
 
     # Simple UTC comparison to avoid timezone issues
     expiry = cert.not_valid_after_utc
@@ -671,7 +676,7 @@ def check_cert_expiry(cert_path: Path, days_warning: int = 1) -> None:
 
     if time_left.total_seconds() < 0:
         logger.error(f'Certificate at {cert_path} EXPIRED on {expiry}.')
-        raise ValueError
+        raise ValueError('Certificate expired')
 
     if time_left < timedelta(days=days_warning):
         logger.warning(f'Certificate expires in {time_left.days} days ({expiry}).')

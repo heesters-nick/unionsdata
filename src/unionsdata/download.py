@@ -135,7 +135,7 @@ def fetch_expected_sizes(
         try:
             header = fetch_fits_header(specs['http_url'], session, retries=2, timeout=10)
             size = get_file_size(header) if header else 0
-        except Exception:
+        except (requests.RequestException, ValueError, KeyError):
             size = 0
         finally:
             session.close()
@@ -1162,12 +1162,12 @@ def report_download_summary(
     # Width for the label column
     W = 32
 
-    logger.info('=' * 40)
+    logger.info('=' * 45)
     logger.info('RUN STATISTICS')
 
     # --- DOWNLOADS ---
     if not cutout_mode == 'direct_only':
-        logger.info('-' * 40)
+        logger.info('-' * 45)
         logger.info('⬇️  TILE DOWNLOADS:')
         logger.info(f'   ✨ {"New:":<{W}} {download_stats.get("downloaded", 0)}')
         logger.info(f'   ⏭️  {"Skipped (already on disk):":<{W}} {download_stats.get("skipped", 0)}')
@@ -1182,7 +1182,7 @@ def report_download_summary(
 
     # --- CUTOUTS ---
     if cutouts_enabled:
-        logger.info('-' * 40)
+        logger.info('-' * 45)
         logger.info('✂️  CUTOUTS:')
         logger.info(f'   ✨ {"New:":<{W}} {cutout_stats.get("new", 0)}')
         logger.info(f'   ⏭️  {"Skipped (already done):":<{W}} {cutout_stats.get("skipped", 0)}')
@@ -1194,4 +1194,4 @@ def report_download_summary(
             )
         logger.info(f'   ❌ {"Failed:":<{W}} {cutout_stats.get("failed", 0)}')
 
-    logger.info('=' * 40)
+    logger.info('=' * 45)

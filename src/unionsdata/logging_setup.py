@@ -22,7 +22,6 @@ def setup_logger(
 
     # Create formatters
     file_formatter = logging.Formatter('%(asctime)s - ID %(process)d - %(levelname)s - %(message)s')
-    # console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # Filter redundant logging messages to decrease clutter
     log_filter = LoggingFilter()
@@ -38,19 +37,12 @@ def setup_logger(
     file_handler.addFilter(log_filter)
 
     # Set up console handler
-    # console_handler = TqdmLoggingHandler()
     console_handler = RichHandler(
         rich_tracebacks=True, show_time=False, show_level=True, show_path=False, markup=True
     )
-    # console_handler.setFormatter(console_formatter)
     console_handler.addFilter(log_filter)
 
     # Configure root logger
-    # logging.basicConfig(
-    #     level=logging_level,
-    #     handlers=[file_handler, console_handler],
-    #     force=force,  # Overwrite any existing logging configuration
-    # )
     logging.basicConfig(
         level=logging_level,
         format='%(message)s',
@@ -85,8 +77,9 @@ class LoggingFilter(logging.Filter):
     """Filter to suppress redundant VOSpace config messages."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        msg = str(record.msg)
         return not (
-            record.msg.startswith('Using config file')
-            and 'default-vos-config' in record.msg
+            msg.startswith('Using config file')
+            and 'default-vos-config' in msg
             and record.levelno == logging.INFO
         )

@@ -80,7 +80,16 @@ def load_cutouts(
     logger.info(f'Found {len(catalog_success)}/{len(catalog)} objects with successful cutouts')
 
     if len(catalog_success) == 0:
-        raise RuntimeError('No objects with successful cutouts found in catalog')
+        # Collect all unique bands present in the catalog using a set comprehension
+        available_bands = {
+            b for val in catalog['cutout_bands'].dropna().unique() for b in str(val).split(',') if b
+        }
+
+        raise RuntimeError(
+            f'No objects with valid cutouts found.\n'
+            f'Requested bands: {bands_to_plot} not available for the chosen input.\n'
+            f'Available bands: {sorted(available_bands)}.'
+        )
 
     # Group by tile
     unique_tiles = catalog_success['tile'].unique()

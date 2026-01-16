@@ -4,6 +4,7 @@ import io
 import logging
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
@@ -15,6 +16,7 @@ import pandas as pd
 import requests
 from astropy.io import fits
 from astropy.io.fits import ImageHDU, PrimaryHDU
+from astropy.utils.exceptions import AstropyWarning
 from numpy.typing import NDArray
 from rich.progress import (
     BarColumn,
@@ -220,27 +222,40 @@ def parse_cutout_bytes(
     Returns:
         Array of shape (cutout_size, cutout_size)
     """
+    if len(data) <= 2880:
+        raise RuntimeError('Server returned only FITS header (truncated data)')
+
     output = np.zeros((cutout_size, cutout_size), dtype=np.float32)
 
-    with fits.open(io.BytesIO(data), memmap=False) as hdul:
-        if fits_ext >= len(hdul):
-            fits_ext = 0
-        hdu = cast(ImageHDU | PrimaryHDU, hdul[fits_ext])
+    try:
+        # Silence Astropy warnings about truncation/checksums to avoid double logging
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', AstropyWarning)
+        with fits.open(io.BytesIO(data), memmap=False) as hdul:
+            if fits_ext >= len(hdul):
+                fits_ext = 0
+            hdu = cast(ImageHDU | PrimaryHDU, hdul[fits_ext])
 
-        if hdu.data is None:
-            raise ValueError(f'No data in extension {fits_ext}')
+            if hdu.data is None:
+                raise ValueError(f'No data in extension {fits_ext}')
 
-        img = hdu.data.astype(np.float32)
-        h, w = img.shape
+            img = hdu.data.astype(np.float32)
+            h, w = img.shape
 
-        # Calculate valid placement region
-        y_end = min(pad_y + h, cutout_size)
-        x_end = min(pad_x + w, cutout_size)
-        h_copy = y_end - pad_y
-        w_copy = x_end - pad_x
+            # Calculate valid placement region
+            y_end = min(pad_y + h, cutout_size)
+            x_end = min(pad_x + w, cutout_size)
+            h_copy = y_end - pad_y
+            w_copy = x_end - pad_x
 
-        if h_copy > 0 and w_copy > 0:
-            output[pad_y:y_end, pad_x:x_end] = img[:h_copy, :w_copy]
+            if h_copy > 0 and w_copy > 0:
+                output[pad_y:y_end, pad_x:x_end] = img[:h_copy, :w_copy]
+
+    except (OSError, TypeError, ValueError) as e:
+        # OSError: Corrupt FITS header or truncated file
+        # TypeError: Malformed data structure or unexpected type in FITS parsing
+        # ValueError: Our explicit check for hdu.data is None
+        raise RuntimeError(f'FITS parsing failed (corrupt download?): {e}') from e
 
     return output
 
@@ -318,7 +333,13 @@ def download_worker(
                 stats.record_success()
 
             except Exception as e:
-                logger.debug(f'Failed {job.object_id}/{job.band}: {e}')
+                err_msg = str(e)
+                if 'Server returned only FITS header' in err_msg:
+                    logger.warning(
+                        f'{job.object_id} ({job.band}) failed: Direct cutout not supported by server (received header only).'
+                    )
+                else:
+                    logger.error(f'{job.object_id} ({job.band}) failed: {e}')
                 stats.record_failure()
 
             finally:
@@ -642,51 +663,58 @@ def save_results_by_tile(
 
         return count
 
-    existing_info = analyze_existing_file(output_path)
+    try:
+        existing_info = analyze_existing_file(output_path)
 
-    # Case 1: new file
-    if not existing_info.exists:
-        data = get_data_array(tile_catalog, bands)
-        write_to_h5(output_path, data, tile_catalog, bands, tile_key, band_dict)
-        ops_count = count_ops(tile_catalog, bands)
-        return ops_count, 0, 0
+        # Case 1: new file
+        if not existing_info.exists:
+            data = get_data_array(tile_catalog, bands)
+            write_to_h5(output_path, data, tile_catalog, bands, tile_key, band_dict)
+            ops_count = count_ops(tile_catalog, bands)
+            return ops_count, 0, 0
 
-    # Case 2: existing file (update/append)
-    # Determine new vs existing bands
-    new_bands = [b for b in bands if b not in existing_info.bands]
+        # Case 2: existing file (update/append)
+        # Determine new vs existing bands
+        new_bands = [b for b in bands if b not in existing_info.bands]
 
-    # Satisfy type checker
-    assert existing_info.object_coords is not None
+        # Satisfy type checker
+        assert existing_info.object_coords is not None
 
-    # Match coordinates to find existing objects
-    cat_coords = np.column_stack([tile_catalog['ra'], tile_catalog['dec']]).astype(np.float32)
-    is_match, match_idx = match_objects_by_coords(cat_coords, existing_info.object_coords)
+        # Match coordinates to find existing objects
+        cat_coords = np.column_stack([tile_catalog['ra'], tile_catalog['dec']]).astype(np.float32)
+        is_match, match_idx = match_objects_by_coords(cat_coords, existing_info.object_coords)
 
-    n_new = int((~is_match).sum())
+        n_new = int((~is_match).sum())
 
-    ops_new = 0
-    ops_updated = 0
-    ops_skipped = 0
+        ops_new = 0
+        ops_updated = 0
+        ops_skipped = 0
 
-    # A. Update matched objects (add new bands if available)
-    if is_match.any():
-        if new_bands:
-            matched_df = tile_catalog[is_match].reset_index(drop=True)
-            new_data = get_data_array(matched_df, new_bands)
+        # A. Update matched objects (add new bands if available)
+        if is_match.any():
+            if new_bands:
+                matched_df = tile_catalog[is_match].reset_index(drop=True)
+                new_data = get_data_array(matched_df, new_bands)
 
-            merge_bands_into_h5(
-                output_path, new_data, new_bands, existing_info, match_idx[is_match], band_dict
-            )
-            ops_updated = count_ops(matched_df, new_bands)
-        else:
-            ops_skipped = 0
+                merge_bands_into_h5(
+                    output_path, new_data, new_bands, existing_info, match_idx[is_match], band_dict
+                )
+                ops_updated = count_ops(matched_df, new_bands)
+            else:
+                ops_skipped = 0
 
-    # B. Append completely new objects (write all bands)
-    if n_new > 0:
-        new_df = tile_catalog[~is_match].reset_index(drop=True)
-        data = get_data_array(new_df, bands)
-        write_to_h5(output_path, data, new_df, bands, tile_key, band_dict)
+        # B. Append completely new objects (write all bands)
+        if n_new > 0:
+            new_df = tile_catalog[~is_match].reset_index(drop=True)
+            data = get_data_array(new_df, bands)
+            write_to_h5(output_path, data, new_df, bands, tile_key, band_dict)
 
-        ops_new = count_ops(new_df, bands)
+            ops_new = count_ops(new_df, bands)
+
+    except (OSError, ValueError, RuntimeError) as e:
+        # Catch locking errors, disk full, or corrupt HDF5 files
+        # We log and return 0 so the stream doesn't crash
+        logger.error(f'Failed to save cutouts to {output_path}: {e}')
+        return 0, 0, 0
 
     return ops_new, ops_updated, ops_skipped

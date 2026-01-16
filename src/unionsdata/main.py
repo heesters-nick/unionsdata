@@ -13,7 +13,9 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import yaml
+from pydantic import ValidationError
 from rich.logging import RichHandler
+from yaml import YAMLError
 
 from unionsdata.config import (
     BandDict,
@@ -116,10 +118,13 @@ def run_download(args: argparse.Namespace) -> None:
         cfg = load_settings(config_path=args.config, cli_overrides=overrides)
         logger.info(f'Loaded config from: {cfg.config_source}')
     except FileNotFoundError:
-        logger.error('No config file found!')
-        logger.info(
-            "Run 'unionsdata init' to create a config, or use --config /path/to/config.yaml"
-        )
+        logger.error('No config file found! Run "unionsdata init".')
+        sys.exit(1)
+    except (ValidationError, ValueError) as e:
+        logger.error(f'Configuration error:\n{e}')
+        sys.exit(1)
+    except YAMLError as e:
+        logger.error(f'Corrupt config file (invalid YAML):\n{e}')
         sys.exit(1)
     # Get rid of any previous log files if resume = False
     purge_previous_run(cfg)
@@ -523,10 +528,13 @@ def run_plot(args: argparse.Namespace) -> None:
         cfg = load_settings(config_path=args.config, cli_overrides=overrides)
         logger.info(f'Loaded config from: {cfg.config_source}')
     except FileNotFoundError:
-        logger.error('No config file found!')
-        logger.info(
-            "Run 'unionsdata init' to create a config, or use --config /path/to/config.yaml"
-        )
+        logger.error('No config file found! Run "unionsdata init".')
+        sys.exit(1)
+    except (ValidationError, ValueError) as e:
+        logger.error(f'Configuration error:\n{e}')
+        sys.exit(1)
+    except YAMLError as e:
+        logger.error(f'Corrupt config file (invalid YAML):\n{e}')
         sys.exit(1)
     # Get rid of any previous log files if resume = False
     purge_previous_run(cfg)
@@ -589,13 +597,17 @@ def run_plot(args: argparse.Namespace) -> None:
     )
     save_path = figure_dir / save_filename
 
-    cutout_data = load_cutouts(
-        catalog_path=catalog_path,
-        bands_to_plot=plot_bands,
-        data_dir=data_dir,
-        cutout_subdir=cfg.cutouts.output_subdir,
-        cutout_size=cutout_size,
-    )
+    try:
+        cutout_data = load_cutouts(
+            catalog_path=catalog_path,
+            bands_to_plot=plot_bands,
+            data_dir=data_dir,
+            cutout_subdir=cfg.cutouts.output_subdir,
+            cutout_size=cutout_size,
+        )
+    except (RuntimeError, FileNotFoundError, ValueError) as e:
+        logger.error(f'{e}')
+        sys.exit(1)
 
     cutout_data = cutouts_to_rgb(
         cutout_data=cutout_data,
