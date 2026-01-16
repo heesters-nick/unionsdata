@@ -5,7 +5,7 @@ import subprocess
 import time
 from itertools import combinations
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import cast
 
 import h5py
 import numpy as np
@@ -21,12 +21,6 @@ from unionsdata.config import BandDict, InputsCfg
 from unionsdata.kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 
 logger = logging.getLogger(__name__)
-
-
-class ProcessingStats(TypedDict):
-    skipped_tile_bands: list[tuple[str, str]]
-    rejected_operations: int
-    skipped_operations: int
 
 
 class TileAvailability:
@@ -777,7 +771,7 @@ def compute_bands_to_process(
     existing_col: str,
     output_col: str,
     require_all: bool = False,
-) -> tuple[pd.DataFrame, ProcessingStats]:
+) -> pd.DataFrame:
     """
     Compute which bands need processing for each object.
 
@@ -789,16 +783,10 @@ def compute_bands_to_process(
         require_all: If True, skip objects missing required bands in 'bands_available'
 
     Returns:
-        Tuple of (catalog with new column, stats dict)
+        Updated catalog with new column for bands needing processing
     """
     catalog = catalog.copy()
     req_bands_set = set(bands)
-
-    stats: ProcessingStats = {
-        'skipped_tile_bands': [],
-        'skipped_operations': 0,
-        'rejected_operations': 0,
-    }
 
     def get_bands_to_process(row: pd.Series) -> list[str]:
         # Parse available bands
@@ -809,9 +797,6 @@ def compute_bands_to_process(
         # Check require_all constraint
         if require_all and not req_bands_set.issubset(available):
             potential = req_bands_set & available
-
-            stats['rejected_operations'] += len(potential)
-
             return []
 
         # Parse existing bands
@@ -823,20 +808,11 @@ def compute_bands_to_process(
 
         # Compute what's needed
         potential = req_bands_set & available
-        done = potential & existing
-
-        if done:
-            count = len(done)
-            stats['skipped_operations'] += count  # Raw count (for cutouts)
-
-            # Record tile info (for download deduplication)
-            for band in done:
-                stats['skipped_tile_bands'].append((row['tile'], band))
 
         return list(potential - existing)
 
     catalog[output_col] = catalog.apply(get_bands_to_process, axis=1)
-    return catalog, stats
+    return catalog
 
 
 def filter_for_processing(
@@ -846,8 +822,6 @@ def filter_for_processing(
     cutout_col: str,
     require_all: bool,
     cutouts_enabled: bool,
-    download_stats: dict[str, int],
-    cutout_stats: dict[str, int],
 ) -> pd.DataFrame | None:
     """
     Filter catalog to objects needing either downloads or cutouts.
@@ -863,34 +837,29 @@ def filter_for_processing(
         cutout_col: Column tracking cutout bands
         require_all: If True, skip objects missing required bands
         cutouts_enabled: Whether to compute cutout requirements
-        download_stats: Dictionary to track download statistics
-        cutout_stats: Dictionary to track cutout statistics
 
     Returns:
         Filtered catalog
     """
     # Compute download requirements
-    catalog, dl_stats = compute_bands_to_process(
+    catalog = compute_bands_to_process(
         catalog=catalog,
         bands=bands,
         existing_col=download_col,
         output_col='bands_to_download',
         require_all=require_all,
     )
-    download_stats['skipped'] = len(set(dl_stats['skipped_tile_bands']))
-    download_stats['rejected'] += dl_stats['rejected_operations']
 
     # Compute cutout requirements (if enabled)
     if cutouts_enabled:
-        catalog, cut_stats = compute_bands_to_process(
+        catalog = compute_bands_to_process(
             catalog=catalog,
             bands=bands,
             existing_col=cutout_col,
             output_col='bands_to_cutout',
             require_all=require_all,
         )
-        cutout_stats['skipped'] += cut_stats['skipped_operations']
-        cutout_stats['rejected'] += cut_stats['rejected_operations']
+
     else:
         catalog['bands_to_cutout'] = [[] for _ in range(len(catalog))]
 
@@ -907,8 +876,6 @@ def filter_for_processing(
     logger.debug(f'Processing requirements for bands {bands}:')
     logger.debug(f'  Objects needing downloads: {n_need_download}/{len(catalog)}')
     logger.debug(f'  Objects needing cutouts:   {n_need_cutout}/{len(catalog)}')
-    logger.debug(f'  Download tasks skipped:    {download_stats["skipped"]}')
-    logger.debug(f'  Cutout tasks skipped:      {cutout_stats["skipped"]}')
 
     if filtered_catalog.empty:
         return None

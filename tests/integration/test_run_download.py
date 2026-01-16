@@ -288,7 +288,7 @@ def mock_cutout_creation(mocker):
         else:
             n_cutouts = 0
 
-        future.set_result(CutoutResult(n_cutouts, 0, 0, {}))  # Return actual catalog size
+        future.set_result(CutoutResult(n_cutouts, 0, {}))  # Return actual catalog size
         return future
 
     mock_executor = mocker.MagicMock()

@@ -36,6 +36,7 @@ from unionsdata.cutouts import (
     write_to_h5,
 )
 from unionsdata.download import make_session, tile_band_specs
+from unionsdata.stats import RunStatistics
 from unionsdata.utils import get_wavelength_order
 
 logger = logging.getLogger(__name__)
@@ -57,20 +58,25 @@ class CutoutJob:
 
 @dataclass
 class StreamingStats:
-    """Thread-safe download statistics."""
+    """Thread-safe download statistics with per-band tracking."""
 
     total: int = 0
-    completed: int = 0
+    succeeded: int = 0
     failed: int = 0
     _lock: Lock = field(default_factory=Lock)
+    # Per-band tracking
+    band_succeeded: dict[str, int] = field(default_factory=dict)
+    band_failed: dict[str, int] = field(default_factory=dict)
 
-    def record_success(self) -> None:
+    def record_success(self, band: str) -> None:
         with self._lock:
-            self.completed += 1
+            self.succeeded += 1
+            self.band_succeeded[band] = self.band_succeeded.get(band, 0) + 1
 
-    def record_failure(self) -> None:
+    def record_failure(self, band: str) -> None:
         with self._lock:
             self.failed += 1
+            self.band_failed[band] = self.band_failed.get(band, 0) + 1
 
 
 def check_cutout_availability(catalog: pd.DataFrame, bands: list[str]) -> int:
@@ -330,7 +336,7 @@ def download_worker(
                         results[job.object_id] = {}
                     results[job.object_id][job.band] = cutout_data
 
-                stats.record_success()
+                stats.record_success(job.band)
 
             except Exception as e:
                 err_msg = str(e)
@@ -340,7 +346,7 @@ def download_worker(
                     )
                 else:
                     logger.error(f'{job.object_id} ({job.band}) failed: {e}')
-                stats.record_failure()
+                stats.record_failure(job.band)
 
             finally:
                 job_queue.task_done()
@@ -391,7 +397,7 @@ def stream_direct_cutouts(
     cert_path: Path,
     max_retries: int,
     n_workers: int,
-    cutout_stats: dict[str, int],
+    run_stats: RunStatistics,
     cutout_success_map: dict[str, set[str]],
     batch_size: int = 500,
 ) -> None:
@@ -414,7 +420,7 @@ def stream_direct_cutouts(
         cert_path: Path to SSL certificate for requests
         max_retries: Max retries for failed downloads
         n_workers: Number of parallel download threads
-        cutout_stats: Dict to update with cutout statistics
+        run_stats: RunStatistics object for per-band tracking
         cutout_success_map: Dict to update with successful cutout bands per object
         batch_size: Number of objects to process per batch
 
@@ -438,20 +444,17 @@ def stream_direct_cutouts(
         valid_mask = catalog[query_cols].notna().any(axis=1)
         n_invalid_coords = int((~valid_mask).sum())
         catalog = catalog[valid_mask].reset_index(drop=True)
+        if n_invalid_coords > 0:
+            logger.warning(f'Skipping {n_invalid_coords} objects with no valid cutout coordinates')
+            for band in bands:
+                run_stats.record_cutout_result(band, skipped=n_invalid_coords)
     else:
         # Should not happen if bands list is valid
-        cutout_stats['skipped'] += len(catalog)
         return
 
     if catalog.empty:
         logger.warning('No valid cutouts after filtering')
-        cutout_stats['skipped'] += n_invalid_coords
         return
-
-    # Initialize counters
-    total_new = 0
-    total_updated = 0
-    total_skipped = n_invalid_coords
 
     # Shared state for all batches
     job_queue: Queue[CutoutJob | None] = Queue()
@@ -538,19 +541,19 @@ def stream_direct_cutouts(
                 jobs_queued += batch_job_count
 
                 # Wait for this batch to complete
-                while (stats.completed + stats.failed) < jobs_queued:
-                    progress.update(task, completed=stats.completed + stats.failed)
+                while (stats.succeeded + stats.failed) < jobs_queued:
+                    progress.update(task, completed=stats.succeeded + stats.failed)
                     time.sleep(0.1)
                     if shutdown.is_set():
                         break
 
-                progress.update(task, completed=stats.completed + stats.failed)
+                progress.update(task, completed=stats.succeeded + stats.failed)
 
                 # Save results for tiles in this batch
                 for tile_key in chunk['tile'].unique():
                     tile_chunk = chunk[chunk['tile'] == tile_key]
 
-                    n_n, n_u, n_s = save_results_by_tile(
+                    save_results_by_tile(
                         results=results,
                         catalog=tile_chunk,
                         bands=bands,
@@ -559,9 +562,6 @@ def stream_direct_cutouts(
                         cutout_subdir=cutout_subdir,
                         cutout_size=cutout_size,
                     )
-                    total_new += n_n
-                    total_updated += n_u
-                    total_skipped += n_s
 
                 # Update success map
                 for obj_id_str, bands_data in results.items():
@@ -584,11 +584,11 @@ def stream_direct_cutouts(
     for w in workers:
         w.join(timeout=5.0)
 
-    # Update stats
-    cutout_stats['new'] += total_new
-    cutout_stats['updated'] += total_updated
-    cutout_stats['skipped'] += total_skipped
-    cutout_stats['failed'] += stats.failed
+    # Update run_stats with per-band results
+    for band in bands:
+        succeeded = stats.band_succeeded.get(band, 0)
+        failed = stats.band_failed.get(band, 0)
+        run_stats.record_cutout_result(band, succeeded=succeeded, failed=failed)
 
 
 def save_results_by_tile(
@@ -599,7 +599,7 @@ def save_results_by_tile(
     download_dir: Path,
     cutout_subdir: str,
     cutout_size: int,
-) -> tuple[int, int, int]:
+) -> None:
     """
     Save cutouts to HDF5. Handles creating new files or updating existing ones.
 
@@ -613,12 +613,12 @@ def save_results_by_tile(
         cutout_size: Size of square cutouts in pixels
 
     Returns:
-        Tuple of (n_new, n_updated, n_skipped)
+        None
     """
     # Filter catalog to objects we actually have results for
     valid_mask = catalog['ID'].astype(str).isin(results.keys())
     if not valid_mask.any():
-        return 0, 0, 0
+        return
 
     tile_catalog = catalog[valid_mask].reset_index(drop=True)
     tile_key = tile_catalog['tile'].iloc[0]
@@ -645,24 +645,6 @@ def save_results_by_tile(
                     arr[i, j] = obj_res[b]
         return arr
 
-    def count_ops(df: pd.DataFrame, target_bands: list[str]) -> int:
-        """Helper to count how many object-band cutouts were processed in this batch.
-        Args:
-            df: DataFrame of objects to include
-            target_bands: Bands to check for existence
-        Returns:
-            Count of object-band cutouts present in results
-        """
-        count = 0
-        # Iterate through every object in this batch (chunk)
-        for row in df.itertuples():
-            # results = {'Obj1': {'r': array(...), 'i': array(...)}}
-            obj_res = results.get(str(row.ID), {})
-            # Count how many of the 'target_bands' exist for this object
-            count += sum(1 for b in target_bands if b in obj_res)
-
-        return count
-
     try:
         existing_info = analyze_existing_file(output_path)
 
@@ -670,8 +652,7 @@ def save_results_by_tile(
         if not existing_info.exists:
             data = get_data_array(tile_catalog, bands)
             write_to_h5(output_path, data, tile_catalog, bands, tile_key, band_dict)
-            ops_count = count_ops(tile_catalog, bands)
-            return ops_count, 0, 0
+            return
 
         # Case 2: existing file (update/append)
         # Determine new vs existing bands
@@ -686,10 +667,6 @@ def save_results_by_tile(
 
         n_new = int((~is_match).sum())
 
-        ops_new = 0
-        ops_updated = 0
-        ops_skipped = 0
-
         # A. Update matched objects (add new bands if available)
         if is_match.any():
             if new_bands:
@@ -699,9 +676,6 @@ def save_results_by_tile(
                 merge_bands_into_h5(
                     output_path, new_data, new_bands, existing_info, match_idx[is_match], band_dict
                 )
-                ops_updated = count_ops(matched_df, new_bands)
-            else:
-                ops_skipped = 0
 
         # B. Append completely new objects (write all bands)
         if n_new > 0:
@@ -709,12 +683,8 @@ def save_results_by_tile(
             data = get_data_array(new_df, bands)
             write_to_h5(output_path, data, new_df, bands, tile_key, band_dict)
 
-            ops_new = count_ops(new_df, bands)
-
     except (OSError, ValueError, RuntimeError) as e:
         # Catch locking errors, disk full, or corrupt HDF5 files
         # We log and return 0 so the stream doesn't crash
         logger.error(f'Failed to save cutouts to {output_path}: {e}')
-        return 0, 0, 0
-
-    return ops_new, ops_updated, ops_skipped
+        return

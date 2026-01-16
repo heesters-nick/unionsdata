@@ -28,7 +28,7 @@ from unionsdata.config import (
 )
 from unionsdata.cutout_stream import stream_direct_cutouts
 from unionsdata.cutouts import create_cutouts_for_existing_tiles
-from unionsdata.download import download_tiles, report_download_summary
+from unionsdata.download import download_tiles
 from unionsdata.logging_setup import setup_logger
 from unionsdata.plotting import (
     build_plot_filename,
@@ -36,6 +36,15 @@ from unionsdata.plotting import (
     find_most_recent_catalog,
     load_cutouts,
     plot_cutouts,
+)
+from unionsdata.stats import (
+    RunStatistics,
+    compute_cutout_availability,
+    compute_cutout_skipped,
+    compute_tile_availability,
+    compute_tile_availability_from_catalog,
+    compute_tile_availability_from_tiles,
+    report_summary,
 )
 from unionsdata.tui import run_config_editor
 from unionsdata.utils import (
@@ -168,6 +177,10 @@ def run_download(args: argparse.Namespace) -> None:
     # make sure necessary directories exist
     ensure_runtime_dirs(cfg=cfg)
 
+    # Initialize RunStatistics
+    run_stats = RunStatistics()
+    run_stats.initialize_bands(bands)
+
     # Query availability of tiles
     logger.debug('Querying tile availability...')
     availability_all, all_tiles = query_availability(
@@ -199,10 +212,6 @@ def run_download(args: argparse.Namespace) -> None:
     catalog_to_process: pd.DataFrame | None = catalog.copy()
     catalog_path = Path()
 
-    # Stats counters
-    download_stats = {'downloaded': 0, 'skipped': 0, 'failed': 0, 'rejected': 0}
-    cutout_stats = {'new': 0, 'updated': 0, 'skipped': 0, 'failed': 0, 'rejected': 0}
-
     tile_success_map: dict[str, set[str]] = {}  # {'123_456': {'r', 'i'}}
     cutout_success_map: dict[str, set[str]] = {}  # {'objectID': {'r', 'i'}}
 
@@ -217,6 +226,12 @@ def run_download(args: argparse.Namespace) -> None:
             existing_catalog=catalog_existing,
         )
 
+        # Compute availability statistics
+        compute_tile_availability_from_catalog(catalog, bands, run_stats)
+        if cutouts_enabled:
+            compute_cutout_availability(catalog, bands, run_stats)
+            compute_cutout_skipped(catalog, bands, run_stats)
+
         catalog_to_process = filter_for_processing(
             catalog=catalog,
             bands=bands,
@@ -224,8 +239,6 @@ def run_download(args: argparse.Namespace) -> None:
             cutout_col='cutout_bands',
             require_all=require_all,
             cutouts_enabled=cutouts_enabled,
-            download_stats=download_stats,
-            cutout_stats=cutout_stats,
         )
 
         # Early exit if nothing to do
@@ -237,7 +250,26 @@ def run_download(args: argparse.Namespace) -> None:
                     catalog.drop(columns=[col_name], inplace=True)
             # Save augmented catalog
             catalog.to_csv(catalog_path, index=False)
+
+            # Still show summary for visibility
+            report_summary(
+                stats=run_stats,
+                cutouts_enabled=cutouts_enabled,
+                cutout_mode=cutout_mode,
+                show_tiles=(cutout_mode != 'direct_only'),
+            )
+
             sys.exit(0)
+
+    else:
+        # Tile-based input: compute tile availability
+        if tiles_x_bands:
+            compute_tile_availability_from_tiles(
+                requested_tiles=tiles_x_bands,
+                bands=bands,
+                avail=availability_sel,
+                stats=run_stats,
+            )
 
     # Branch off for direct cutout streaming
     if cutout_mode == 'direct_only':
@@ -262,7 +294,7 @@ def run_download(args: argparse.Namespace) -> None:
             cert_path=cert_path,
             max_retries=max_retries,
             n_workers=download_threads,
-            cutout_stats=cutout_stats,
+            run_stats=run_stats,
             cutout_success_map=cutout_success_map,
         )
 
@@ -288,10 +320,19 @@ def run_download(args: argparse.Namespace) -> None:
             )
         else:
             logger.info('No tiles or objects to process.')
+            report_summary(
+                stats=run_stats,
+                cutouts_enabled=cutouts_enabled,
+                cutout_mode=cutout_mode,
+                show_tiles=True,
+            )
             return
 
         # Sort for deterministic execution
         download_jobs = sorted(needed_jobs)
+
+        # Compute tile availability from download jobs
+        compute_tile_availability(download_jobs, bands, run_stats)
 
         # Log download summary
         total_downloads = len(download_jobs)
@@ -323,8 +364,7 @@ def run_download(args: argparse.Namespace) -> None:
                     log_dir=cfg.paths.log_directory,
                     log_name=cfg.logging.name,
                     log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
-                    download_stats=download_stats,
-                    cutout_stats=cutout_stats,
+                    run_stats=run_stats,
                     tile_success_map=tile_success_map,
                     cutout_success_map=cutout_success_map,
                 )
@@ -363,7 +403,7 @@ def run_download(args: argparse.Namespace) -> None:
                     log_dir=cfg.paths.log_directory,
                     log_name=cfg.logging.name,
                     log_level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
-                    cutout_stats=cutout_stats,
+                    run_stats=run_stats,
                     cutout_success_map=cutout_success_map,
                 )
 
@@ -382,12 +422,12 @@ def run_download(args: argparse.Namespace) -> None:
             catalog.to_csv(catalog_path, index=False)
             logger.info(f'Saved augmented catalog to {catalog_path}')
 
-    # Report download summary
-    report_download_summary(
-        download_stats=download_stats,
-        cutout_stats=cutout_stats,
+    # Report summary using new rich tables
+    report_summary(
+        stats=run_stats,
         cutouts_enabled=cutouts_enabled,
         cutout_mode=cutout_mode,
+        show_tiles=(cutout_mode != 'direct_only'),
     )
 
     end = time.time()

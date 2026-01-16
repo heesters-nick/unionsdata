@@ -31,6 +31,7 @@ from rich.progress import (
 
 from unionsdata.config import BandDict, CutoutsCfg
 from unionsdata.cutouts import CutoutResult, create_cutouts_for_tile, worker_log_init
+from unionsdata.stats import RunStatistics
 from unionsdata.utils import decompress_fits, split_by_tile, tile_str
 from unionsdata.verification import get_file_size, is_fits_valid, verify_download
 
@@ -526,7 +527,7 @@ def download_worker(
     tiles_claimed_for_cutout: set[str],
     progress_tracker: ProgressTracker,
     expected_sizes: dict[Path, int],
-    download_stats: dict[str, int],
+    run_stats: RunStatistics,
     stats_lock: threading.Lock,
 ) -> None:
     """
@@ -606,9 +607,9 @@ def download_worker(
                     expected_file_size=expected_size if expected_size > 0 else None,
                 )
 
-                # Update shared stats safely
+                # Update per-band stats safely
                 with stats_lock:
-                    download_stats[status] = download_stats.get(status, 0) + 1
+                    run_stats.record_tile_download(band, status)
 
                 if status in ['downloaded', 'skipped']:
                     downloads_completed += 1
@@ -725,8 +726,7 @@ def download_tiles(
     log_dir: Path,
     log_name: str,
     log_level: int,
-    download_stats: dict[str, int],
-    cutout_stats: dict[str, int],
+    run_stats: RunStatistics,
     tile_success_map: dict[str, set[str]],
     cutout_success_map: dict[str, set[str]],
 ) -> None:
@@ -748,8 +748,7 @@ def download_tiles(
         log_dir: Directory to save logs
         log_name: Name of the log file
         log_level: Logging level
-        download_stats: Dictionary to track download statistics
-        cutout_stats: Dictionary to track cutout statistics
+        run_stats: RunStatistics object to track download statistics
         tile_success_map: Dictionary to track successful downloads per tile
         cutout_success_map: Dictionary to track successful cutouts per tiles
 
@@ -871,7 +870,7 @@ def download_tiles(
                 tiles_claimed_for_cutout,
                 progress_tracker,
                 expected_sizes,
-                download_stats,
+                run_stats,
                 stats_lock,
             ),
             name=f'DownloadWorker-{i}',
@@ -971,37 +970,36 @@ def download_tiles(
                 time.sleep(0.2)
 
                 # Process collected results
-                cutouts_new = 0
-                cutouts_failed = 0
-                cutouts_skipped = 0
-                cutouts_updated = 0
-                failed_tiles: list[str] = []
-
                 for tile_key, result in collected_results.items():
                     if isinstance(result, Exception):
-                        cutouts_failed += 1
-                        failed_tiles.append(tile_key)
+                        with stats_lock:
+                            for band in requested_bands:
+                                run_stats.record_cutout_result(band, failed=1)
                         logger.error(f'❌ Cutouts failed for tile {tile_key}: {result}')
                         continue
 
-                    n_total = result.n_new + result.n_updated + result.n_skipped
+                    n_total = result.n_succeeded + result.n_skipped
                     if n_total > 0:
                         with tile_success_map_lock:
                             tile_bands = sorted(tile_success_map[tile_key])
                         tile_cutout_info[tile_key] = tile_bands
 
-                        cutouts_new += result.n_new
-                        cutouts_skipped += result.n_skipped
-                        cutouts_updated += result.n_updated
+                        # Update per-band cutout stats from the result
+                        with stats_lock:
+                            for band, band_stats in result.band_stats.items():
+                                run_stats.record_cutout_result(
+                                    band,
+                                    succeeded=band_stats.get('succeeded', 0),
+                                    skipped=band_stats.get('skipped', 0),
+                                    failed=band_stats.get('failed', 0),
+                                )
 
                         # Aggregate per-object band info
                         cutout_success_map.update(result.object_bands)
 
                         parts = []
-                        if result.n_new > 0:
-                            parts.append(f'{result.n_new} new')
-                        if result.n_updated > 0:
-                            parts.append(f'{result.n_updated} updated')
+                        if result.n_succeeded > 0:
+                            parts.append(f'{result.n_succeeded} succeeded')
                         if result.n_skipped > 0:
                             parts.append(f'{result.n_skipped} skipped')
 
@@ -1012,9 +1010,6 @@ def download_tiles(
                             f' Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
                         )
 
-                # Fill cutout stats
-                for key in ['new', 'skipped', 'updated', 'failed']:
-                    cutout_stats[key] += locals()[f'cutouts_{key}']
             else:
                 logger.debug('No cutout jobs were submitted.')
                 cutout_executor.shutdown(wait=False)
@@ -1155,7 +1150,7 @@ def report_download_summary(
 
     Args:
         download_stats: Dictionary with download counts (downloaded, skipped, failed, rejected)
-        cutout_stats: Dictionary with cutout counts (new, updated, skipped, failed)
+        cutout_stats: Dictionary with cutout counts (new, skipped, failed)
         cutouts_enabled: Whether to display the cutout summary section
         cutout_mode: Mode of cutout operation ('disabled', 'direct_only', 'after_download')
     """
@@ -1186,7 +1181,6 @@ def report_download_summary(
         logger.info('✂️  CUTOUTS:')
         logger.info(f'   ✨ {"New:":<{W}} {cutout_stats.get("new", 0)}')
         logger.info(f'   ⏭️  {"Skipped (already done):":<{W}} {cutout_stats.get("skipped", 0)}')
-        logger.info(f'   🔄 {"Updated (new bands):":<{W}} {cutout_stats.get("updated", 0)}')
         rejected_cutouts = cutout_stats.get('rejected', 0)
         if rejected_cutouts > 0:
             logger.info(
