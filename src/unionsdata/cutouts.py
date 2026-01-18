@@ -31,8 +31,6 @@ def worker_log_init(log_dir: Path, name: str, level: int) -> None:
 class CutoutResult:
     """Result of cutout creation for a tile."""
 
-    n_succeeded: int
-    n_skipped: int
     object_bands: dict[str, set[str]]  # object_id -> list of cutout bands
     band_stats: dict[str, dict[str, int]] = field(default_factory=dict)
 
@@ -405,7 +403,7 @@ def create_cutouts_for_tile(
             output_path.unlink()
         except OSError as e:
             logger.error(f'Failed to delete corrupt file {output_path}: {e}')
-            return CutoutResult(0, 0, {}, band_stats)  # Fail gracefully
+            return CutoutResult({}, band_stats)  # Fail gracefully
 
     if not existing_info.exists:
         # Case 1: No existing file - create cutouts for all objects
@@ -441,7 +439,7 @@ def create_cutouts_for_tile(
         for band in loaded_bands:
             band_stats[band]['succeeded'] = n_objects
 
-        return CutoutResult(len(catalog), 0, object_bands, band_stats)
+        return CutoutResult(object_bands, band_stats)
 
     # File exists - determine what's new
     existing_bands_set = set(existing_info.bands)
@@ -456,15 +454,6 @@ def create_cutouts_for_tile(
     is_match, match_indices = match_objects_by_coords(catalog_coords, existing_info.object_coords)
 
     n_matched = int(np.sum(is_match))
-    n_succeeded_objects = len(catalog) - n_matched
-
-    # Initialize counts
-    n_skipped_objects = 0
-
-    logger.debug(
-        f'Tile {tile_key}: {n_matched} existing objects, {n_succeeded_objects} new objects, '
-        f'{len(new_bands)} new bands ({new_bands})'
-    )
 
     # Case 2: Add new bands to existing objects
     if new_bands and n_matched > 0:
@@ -509,24 +498,16 @@ def create_cutouts_for_tile(
                 band_stats[band]['succeeded'] = n_matched
 
     elif n_matched > 0:
-        n_skipped_objects = n_matched
-
         # Record existing bands for skipped objects
         for obj_id in catalog[is_match]['ID'].astype(str):
             object_bands[obj_id] = set(existing_info.bands)
 
-        # Update per-band stats for skipped cutouts
-        for band in bands:
-            if band in existing_info.bands:
-                band_stats[band]['skipped'] = n_matched
-
-        logger.debug(f'Tile {tile_key}: No new bands to add, skipping {n_matched} existing objects')
-
     # Case 3: Append new objects with cutouts in ALL available bands
-    if n_succeeded_objects > 0:
-        logger.debug(f'Tile {tile_key}: Appending {n_succeeded_objects} new objects')
-
-        new_object_catalog = catalog[~is_match].reset_index(drop=True)
+    # Objects that were NOT matched in the step above
+    new_object_catalog = catalog[~is_match].reset_index(drop=True)
+    n_new_objects = len(new_object_catalog)
+    if n_new_objects > 0:
+        logger.debug(f'Tile {tile_key}: Appending {n_new_objects} new objects')
 
         # New objects should have cutouts in all bands (existing + requested)
         # Since tile data exists for existing bands, we can create full cutouts
@@ -561,9 +542,9 @@ def create_cutouts_for_tile(
 
         # Update per-band stats for new cutouts
         for band in loaded_bands:
-            band_stats[band]['succeeded'] += n_succeeded_objects
+            band_stats[band]['succeeded'] += n_new_objects
 
-    return CutoutResult(n_succeeded_objects, n_skipped_objects, object_bands, band_stats)
+    return CutoutResult(object_bands, band_stats)
 
 
 def create_cutouts_for_existing_tiles(
@@ -689,13 +670,13 @@ def create_cutouts_for_existing_tiles(
 
                 cutout_success_map.update(result.object_bands)
 
-                if result.n_succeeded + result.n_skipped > 0:
-                    parts = []
-                    if result.n_succeeded > 0:
-                        parts.append(f'{result.n_succeeded} succeeded')
-                    if result.n_skipped > 0:
-                        parts.append(f'{result.n_skipped} skipped')
-                    logger.debug(f'✅ Cutouts for tile {tile_key}: {", ".join(parts)}')
+                n_objects_processed = len(result.object_bands)
+                if n_objects_processed > 0:
+                    logger.debug(
+                        f'✅ Cutouts for tile {tile_key}: Processed {n_objects_processed} objects'
+                    )
+                else:
+                    logger.warning(f' Tile {tile_key}: created 0 cutouts (objects outside bounds?)')
 
             except Exception as e:
                 for band in bands:

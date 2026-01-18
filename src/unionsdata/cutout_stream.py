@@ -442,12 +442,7 @@ def stream_direct_cutouts(
     if query_cols:
         # Keep row if at least one of the required bands has a valid query
         valid_mask = catalog[query_cols].notna().any(axis=1)
-        n_invalid_coords = int((~valid_mask).sum())
         catalog = catalog[valid_mask].reset_index(drop=True)
-        if n_invalid_coords > 0:
-            logger.warning(f'Skipping {n_invalid_coords} objects with no valid cutout coordinates')
-            for band in bands:
-                run_stats.record_cutout_result(band, skipped=n_invalid_coords)
     else:
         # Should not happen if bands list is valid
         return

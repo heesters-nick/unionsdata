@@ -259,6 +259,9 @@ def report_summary(
     """
     console = Console()
 
+    console.print()
+    console.print('=' * 60, style='bold')
+
     # Determine if we should show tile stats
     show_tile_stats = show_tiles and cutout_mode != 'direct_only'
 
@@ -269,22 +272,21 @@ def report_summary(
     has_cutout_processing = any(p.total_processed > 0 for p in stats.cutout_processing.values())
 
     # ==================== AVAILABILITY SECTION ====================
-    console.print()
-    console.print('=' * 60, style='bold')
-    console.print('AVAILABILITY', style='bold blue', justify='left')
-    console.print('=' * 60, style='bold')
+    avail_tables: list[Table] = []
 
     # Tile availability table
     if show_tile_stats and has_tile_availability:
-        console.print()
-        console.print('📊 TILE AVAILABILITY BY BAND:', style='bold')
-        console.print()
+        table = Table(
+            show_header=True,
+            header_style='bold cyan',
+            title='📊 TILE AVAILABILITY BY BAND',
+            title_style='bold',
+        )
 
-        tile_avail_table = Table(show_header=True, header_style='bold cyan')
-        tile_avail_table.add_column('Band', style='white')
-        tile_avail_table.add_column('Requested', justify='right')
-        tile_avail_table.add_column('Available', justify='right', style='green')
-        tile_avail_table.add_column('Unavailable', justify='right', style='yellow')
+        table.add_column('Band', style='white')
+        table.add_column('Requested', justify='right')
+        table.add_column('Available', justify='right', style='green')
+        table.add_column('Unavailable', justify='right', style='orange3')
 
         total_requested = 0
         total_available = 0
@@ -295,7 +297,7 @@ def report_summary(
             total_available += avail.available
 
             unavail_style = 'red' if avail.unavailable > 0 else 'green'
-            tile_avail_table.add_row(
+            table.add_row(
                 band,
                 str(avail.requested),
                 str(avail.available),
@@ -305,27 +307,29 @@ def report_summary(
         # Add totals row
         total_unavailable = total_requested - total_available
         unavail_style = 'red' if total_unavailable > 0 else 'green'
-        tile_avail_table.add_section()
-        tile_avail_table.add_row(
+        table.add_section()
+        table.add_row(
             '[bold]TOTAL[/bold]',
             f'[bold]{total_requested}[/bold]',
             f'[bold green]{total_available}[/bold green]',
             f'[bold {unavail_style}]{total_unavailable}[/bold {unavail_style}]',
         )
 
-        console.print(tile_avail_table)
+        avail_tables.append(table)
 
     # Cutout availability table
     if cutouts_enabled and has_cutout_availability:
-        console.print()
-        console.print('📊 CUTOUT AVAILABILITY BY BAND:', style='bold')
-        console.print()
+        table = Table(
+            show_header=True,
+            header_style='bold cyan',
+            title='📊 CUTOUT AVAILABILITY BY BAND',
+            title_style='bold',
+        )
 
-        cutout_avail_table = Table(show_header=True, header_style='bold cyan')
-        cutout_avail_table.add_column('Band', style='white')
-        cutout_avail_table.add_column('Requested', justify='right')
-        cutout_avail_table.add_column('Available', justify='right', style='green')
-        cutout_avail_table.add_column('Unavailable', justify='right', style='yellow')
+        table.add_column('Band', style='white')
+        table.add_column('Requested', justify='right')
+        table.add_column('Available', justify='right', style='green')
+        table.add_column('Unavailable', justify='right', style='orange3')
 
         total_requested = 0
         total_available = 0
@@ -336,7 +340,7 @@ def report_summary(
             total_available += avail.available
 
             unavail_style = 'red' if avail.unavailable > 0 else 'green'
-            cutout_avail_table.add_row(
+            table.add_row(
                 band,
                 str(avail.requested),
                 str(avail.available),
@@ -346,33 +350,40 @@ def report_summary(
         # Add totals row
         total_unavailable = total_requested - total_available
         unavail_style = 'red' if total_unavailable > 0 else 'green'
-        cutout_avail_table.add_section()
-        cutout_avail_table.add_row(
+        table.add_section()
+        table.add_row(
             '[bold]TOTAL[/bold]',
             f'[bold]{total_requested}[/bold]',
             f'[bold green]{total_available}[/bold green]',
             f'[bold {unavail_style}]{total_unavailable}[/bold {unavail_style}]',
         )
 
-        console.print(cutout_avail_table)
+        avail_tables.append(table)
+
+    # Print availability tables
+    if avail_tables:
+        # Prepend main header to the first table's title
+        avail_tables[0].title = f'[bold blue]AVAILABILITY[/bold blue]\n\n{avail_tables[0].title}'
+        for table in avail_tables:
+            console.print()
+            console.print(table)
 
     # ==================== PROCESSING SECTION ====================
-    console.print()
-    console.print('=' * 60, style='bold')
-    console.print('PROCESSING RESULTS', style='bold blue', justify='left')
-    console.print('=' * 60, style='bold')
+    proc_tables: list[Table] = []
 
     # Tile processing table
     if show_tile_stats and has_tile_processing:
-        console.print()
-        console.print('⬇️  TILE DOWNLOADS BY BAND:', style='bold')
-        console.print()
+        table = Table(
+            show_header=True,
+            header_style='bold cyan',
+            title='⬇️  TILE DOWNLOADS BY BAND',
+            title_style='bold',
+        )
 
-        tile_proc_table = Table(show_header=True, header_style='bold cyan')
-        tile_proc_table.add_column('Band', style='white')
-        tile_proc_table.add_column('Succeeded', justify='right', style='green')
-        tile_proc_table.add_column('Skipped', justify='right', style='yellow')
-        tile_proc_table.add_column('Failed', justify='right', style='red')
+        table.add_column('Band', style='white')
+        table.add_column('✅ Succeeded', justify='right', style='green')
+        table.add_column('⏭️  Skipped', justify='right', style='orange3')
+        table.add_column('❌ Failed', justify='right', style='red')
 
         total_succeeded = 0
         total_skipped = 0
@@ -385,7 +396,7 @@ def report_summary(
             total_failed += proc.failed
 
             failed_style = 'red' if proc.failed > 0 else 'dim'
-            tile_proc_table.add_row(
+            table.add_row(
                 band,
                 str(proc.succeeded),
                 str(proc.skipped),
@@ -394,27 +405,28 @@ def report_summary(
 
         # Add totals row
         failed_style = 'red' if total_failed > 0 else 'dim'
-        tile_proc_table.add_section()
-        tile_proc_table.add_row(
+        table.add_section()
+        table.add_row(
             '[bold]TOTAL[/bold]',
             f'[bold green]{total_succeeded}[/bold green]',
-            f'[bold yellow]{total_skipped}[/bold yellow]',
+            f'[bold orange3]{total_skipped}[/bold orange3]',
             f'[bold {failed_style}]{total_failed}[/bold {failed_style}]',
         )
-
-        console.print(tile_proc_table)
+        proc_tables.append(table)
 
     # Cutout processing table
     if cutouts_enabled and has_cutout_processing:
-        console.print()
-        console.print('✂️  CUTOUTS BY BAND:', style='bold')
-        console.print()
+        table = Table(
+            show_header=True,
+            header_style='bold cyan',
+            title='✂️  CUTOUTS BY BAND',
+            title_style='bold',
+        )
 
-        cutout_proc_table = Table(show_header=True, header_style='bold cyan')
-        cutout_proc_table.add_column('Band', style='white')
-        cutout_proc_table.add_column('Succeeded', justify='right', style='green')
-        cutout_proc_table.add_column('Skipped', justify='right', style='yellow')
-        cutout_proc_table.add_column('Failed', justify='right', style='red')
+        table.add_column('Band', style='white')
+        table.add_column('✅ Succeeded', justify='right', style='green')
+        table.add_column('⏭️  Skipped', justify='right', style='orange3')
+        table.add_column('❌ Failed', justify='right', style='red')
 
         total_succeeded = 0
         total_skipped = 0
@@ -427,7 +439,7 @@ def report_summary(
             total_failed += proc.failed
 
             failed_style = 'red' if proc.failed > 0 else 'dim'
-            cutout_proc_table.add_row(
+            table.add_row(
                 band,
                 str(proc.succeeded),
                 str(proc.skipped),
@@ -436,15 +448,25 @@ def report_summary(
 
         # Add totals row
         failed_style = 'red' if total_failed > 0 else 'dim'
-        cutout_proc_table.add_section()
-        cutout_proc_table.add_row(
+        table.add_section()
+        table.add_row(
             '[bold]TOTAL[/bold]',
             f'[bold green]{total_succeeded}[/bold green]',
-            f'[bold yellow]{total_skipped}[/bold yellow]',
+            f'[bold orange3]{total_skipped}[/bold orange3]',
             f'[bold {failed_style}]{total_failed}[/bold {failed_style}]',
         )
 
-        console.print(cutout_proc_table)
+        proc_tables.append(table)
+
+    # Print processing tables
+    if proc_tables:
+        # Prepend main header to the FIRST table's title
+        proc_tables[
+            0
+        ].title = f'[bold blue]PROCESSING RESULTS[/bold blue]\n\n{proc_tables[0].title}'
+        for table in proc_tables:
+            console.print()
+            console.print(table)
 
     console.print()
     console.print('=' * 60, style='bold')

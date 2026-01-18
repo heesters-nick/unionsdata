@@ -41,7 +41,6 @@ from unionsdata.stats import (
     RunStatistics,
     compute_cutout_availability,
     compute_cutout_skipped,
-    compute_tile_availability,
     compute_tile_availability_from_catalog,
     compute_tile_availability_from_tiles,
     report_summary,
@@ -330,9 +329,6 @@ def run_download(args: argparse.Namespace) -> None:
 
         # Sort for deterministic execution
         download_jobs = sorted(needed_jobs)
-
-        # Compute tile availability from download jobs
-        compute_tile_availability(download_jobs, bands, run_stats)
 
         # Log download summary
         total_downloads = len(download_jobs)

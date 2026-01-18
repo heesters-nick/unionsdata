@@ -978,8 +978,8 @@ def download_tiles(
                         logger.error(f'❌ Cutouts failed for tile {tile_key}: {result}')
                         continue
 
-                    n_total = result.n_succeeded + result.n_skipped
-                    if n_total > 0:
+                    n_objects_processed = len(result.object_bands)
+                    if n_objects_processed > 0:
                         with tile_success_map_lock:
                             tile_bands = sorted(tile_success_map[tile_key])
                         tile_cutout_info[tile_key] = tile_bands
@@ -997,14 +997,9 @@ def download_tiles(
                         # Aggregate per-object band info
                         cutout_success_map.update(result.object_bands)
 
-                        parts = []
-                        if result.n_succeeded > 0:
-                            parts.append(f'{result.n_succeeded} succeeded')
-                        if result.n_skipped > 0:
-                            parts.append(f'{result.n_skipped} skipped')
-
-                        msg = ', '.join(parts)
-                        logger.debug(f'✅ Cutouts for tile {tile_key}: {msg}')
+                        logger.debug(
+                            f'✅ Cutouts for tile {tile_key}: Processed {n_objects_processed} objects'
+                        )
                     else:
                         logger.warning(
                             f' Tile {tile_key}: created 0 cutouts (objects outside bounds?)'
