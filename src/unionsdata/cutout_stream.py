@@ -28,7 +28,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandCfg
 from unionsdata.cutouts import (
     analyze_existing_file,
     match_objects_by_coords,
@@ -121,7 +121,7 @@ def check_cutout_availability(catalog: pd.DataFrame, bands: list[str]) -> int:
 def build_cutout_queries(
     catalog: pd.DataFrame,
     cutout_size: int,
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     bands: list[str],
     image_limit: int = 10000,
 ) -> pd.DataFrame:
@@ -171,7 +171,7 @@ def build_cutout_queries(
 
     # Build query string for each band (different fits_ext)
     for band in bands:
-        ext = band_dict[band]['fits_ext']
+        ext = band_dict[band].fits_ext
         needs_band = np.array([band in instruction for instruction in catalog['bands_to_cutout']])
         final_mask = geo_valid & needs_band
 
@@ -270,7 +270,7 @@ def download_worker(
     job_queue: Queue[CutoutJob | None],
     results: dict[str, dict[str, NDArray[np.float32]]],
     results_lock: Lock,
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     download_dir: Path,
     cutout_size: int,
     cert_path: Path,
@@ -390,7 +390,7 @@ def fetch_cutout(
 def stream_direct_cutouts(
     catalog: pd.DataFrame,
     bands: list[str],
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     download_dir: Path,
     cutout_subdir: str,
     cutout_size: int,
@@ -587,7 +587,7 @@ def save_results_by_tile(
     results: dict[str, dict[str, NDArray[np.float32]]],
     catalog: pd.DataFrame,
     bands: list[str],
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     download_dir: Path,
     cutout_subdir: str,
     cutout_size: int,

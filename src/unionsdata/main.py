@@ -8,7 +8,6 @@ import time
 from datetime import timedelta
 from importlib.resources import files
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -18,7 +17,7 @@ from rich.logging import RichHandler
 from yaml import YAMLError
 
 from unionsdata.config import (
-    BandDict,
+    BandCfg,
     ensure_runtime_dirs,
     get_config_path,
     get_user_config_dir,
@@ -165,18 +164,13 @@ def run_download(args: argparse.Namespace) -> None:
     cfg_yaml = yaml_to_string(cfg_dict)
     logger.debug(f'Resolved config (YAML):\n{cfg_yaml}')
 
-    all_band_dict: dict[str, BandDict] = {
-        k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
-        for k in cfg.bands.keys()  # ALL bands, not just cfg.runtime.bands
-    }
+    all_band_dict: dict[str, BandCfg] = dict(cfg.bands)
 
     # sort bands by wavelength
     bands = get_wavelength_order(bands, all_band_dict)
 
     # filter considered bands from the full band dictionary
-    selected_band_dict: dict[str, BandDict] = {
-        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in bands
-    }
+    selected_band_dict: dict[str, BandCfg] = {k: cfg.bands[k] for k in bands}
     # make sure necessary directories exist
     ensure_runtime_dirs(cfg=cfg)
 
@@ -605,9 +599,7 @@ def run_plot(args: argparse.Namespace) -> None:
     plot_bands = cfg.plotting.bands or []
 
     # filter considered bands from the full band dictionary
-    selected_band_dict: dict[str, BandDict] = {
-        k: cast(BandDict, cfg.bands[k].model_dump(mode='python')) for k in plot_bands
-    }
+    selected_band_dict: dict[str, BandCfg] = {k: cfg.bands[k] for k in plot_bands}
 
     # CLI override takes precedence
     if hasattr(args, 'catalog') and args.catalog:

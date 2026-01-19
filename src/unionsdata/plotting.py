@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandCfg
 from unionsdata.make_rgb import generate_rgb, normalize_mono, preprocess_cutout
 from unionsdata.utils import filter_catalog_all_bands, get_bands_short_string, get_dataset
 
@@ -231,7 +231,7 @@ def load_cutouts(
 
 def cutouts_to_rgb(
     cutout_data: CutoutData,
-    band_config: dict[str, BandDict],
+    band_config: dict[str, BandCfg],
     scaling_type: Literal['asinh', 'linear'] = 'asinh',
     stretch: float = 125,
     Q: float = 7.0,
@@ -348,7 +348,7 @@ def build_plot_filename(
     catalog_name: str,
     size_pix: int,
     bands: list[str],
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     extension: str,
 ) -> str:
     """Build filename for saving cutout plots.

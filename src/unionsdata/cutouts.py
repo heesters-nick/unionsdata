@@ -11,7 +11,7 @@ from astropy.coordinates import SkyCoord
 from astropy.units import Unit
 from numpy.typing import NDArray
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandCfg
 from unionsdata.logging_setup import setup_logger
 from unionsdata.stats import RunStatistics
 from unionsdata.utils import get_dataset, get_wavelength_order, open_fits, tile_str
@@ -267,7 +267,7 @@ def plan_cutout_operations(
     catalog: pd.DataFrame,
     requested_bands: list[str],
     existing_info: ExistingFileInfo,
-    all_band_dictionary: dict[str, BandDict],
+    all_band_dictionary: dict[str, BandCfg],
 ) -> CutoutPlan:
     """Analyze the situation and produce a plan for cutout operations.
 
@@ -324,7 +324,7 @@ def read_band_data(
     tile_dir: Path,
     tile: tuple[int, int],
     bands: list[str],
-    in_dict: dict[str, BandDict],
+    in_dict: dict[str, BandCfg],
 ) -> tuple[NDArray[np.float32], list[str]]:
     """
     Read image data for specified bands and tile.
@@ -344,11 +344,11 @@ def read_band_data(
     loaded_bands: list[str] = []
 
     for band in bands:
-        zfill = in_dict[band]['zfill']
-        file_prefix = in_dict[band]['name']
-        delimiter = in_dict[band]['delimiter']
-        suffix = in_dict[band]['suffix']
-        fits_ext = in_dict[band]['fits_ext']
+        zfill = in_dict[band].zfill
+        file_prefix = in_dict[band].name
+        delimiter = in_dict[band].delimiter
+        suffix = in_dict[band].suffix
+        fits_ext = in_dict[band].fits_ext
 
         base_dir = tile_dir / band
         num1, num2 = str(tile[0]).zfill(zfill), str(tile[1]).zfill(zfill)
@@ -439,7 +439,7 @@ def merge_bands_into_h5(
     new_bands: list[str],
     existing_info: ExistingFileInfo,
     match_indices: NDArray[np.intp],
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
 ) -> None:
     """
     Merge new band data into existing HDF5 file for matched objects.
@@ -530,7 +530,7 @@ def process_catalog_in_batches(
     tile_dir: Path,
     catalog: pd.DataFrame,
     bands: list[str],
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
     output_path: Path,
     cutout_size: int,
     batch_size: int = DEFAULT_BATCH_SIZE,
@@ -615,7 +615,7 @@ def handle_new_file(
     tile: tuple[int, int],
     tile_dir: Path,
     output_path: Path,
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
     cutout_size: int,
     results: CutoutResultBuilder,
 ) -> None:
@@ -661,7 +661,7 @@ def handle_add_bands(
     tile: tuple[int, int],
     tile_dir: Path,
     output_path: Path,
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
     cutout_size: int,
     results: CutoutResultBuilder,
 ) -> ExistingFileInfo:
@@ -745,7 +745,7 @@ def handle_new_objects(
     tile: tuple[int, int],
     tile_dir: Path,
     output_path: Path,
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
     cutout_size: int,
     results: CutoutResultBuilder,
 ) -> None:
@@ -798,7 +798,7 @@ def create_cutouts_for_tile(
     tile_dir: Path,
     bands: list[str],
     catalog: pd.DataFrame,
-    all_band_dictionary: dict[str, BandDict],
+    all_band_dictionary: dict[str, BandCfg],
     output_dir: Path,
     cutout_size: int,
 ) -> CutoutResult:
@@ -910,7 +910,7 @@ def create_cutouts_for_existing_tiles(
     catalog: pd.DataFrame,
     bands: list[str],
     download_dir: Path,
-    all_band_dictionary: dict[str, BandDict],
+    all_band_dictionary: dict[str, BandCfg],
     cutout_size: int,
     cutout_subdir: str,
     num_workers: int,
@@ -1049,7 +1049,7 @@ def write_to_h5(
     catalog: pd.DataFrame,
     bands: list[str],
     tile_key: str,
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
 ) -> None:
     """
     Write cutouts to HDF5. Creates new file if missing, handles band merging or

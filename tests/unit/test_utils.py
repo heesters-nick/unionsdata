@@ -1,42 +1,42 @@
 import pytest
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandCfg
 from unionsdata.utils import TileAvailability, get_tile_numbers
 
 # Mock band dicts for testing purposes
-MOCK_WHIGS_G: BandDict = {
-    'name': 'calexp-CFIS',
-    'band': 'g',
-    'vos': 'vos:cfis/whigs/stack_images_CFIS_scheme',
-    'suffix': '.fits',
-    'delimiter': '_',
-    'fits_ext': 1,
-    'zfill': 0,
-    'zp': 27.0,
-}
-MOCK_CFIS_LSB_R: BandDict = {
-    'name': 'CFIS_LSB',
-    'band': 'r',
-    'vos': 'vos:cfis/tiles_LSB_DR5',
-    'suffix': '.r.fits',
-    'delimiter': '.',
-    'fits_ext': 0,
-    'zfill': 3,
-    'zp': 30.0,
-}
-MOCK_PS_I: BandDict = {
-    'name': 'PSS.DR4',
-    'band': 'i',
-    'vos': 'vos:cfis/panstarrs/DR4/resamp',
-    'suffix': '.i.fits',
-    'delimiter': '.',
-    'fits_ext': 0,
-    'zfill': 3,
-    'zp': 30.0,
-}
+MOCK_WHIGS_G = BandCfg(
+    name='calexp-CFIS',
+    band='g',
+    vos='vos:cfis/whigs/stack_images_CFIS_scheme',
+    suffix='.fits',
+    delimiter='_',
+    fits_ext=1,
+    zfill=0,
+    zp=27.0,
+)
+MOCK_CFIS_LSB_R = BandCfg(
+    name='CFIS_LSB',
+    band='r',
+    vos='vos:cfis/tiles_LSB_DR5',
+    suffix='.r.fits',
+    delimiter='.',
+    fits_ext=0,
+    zfill=3,
+    zp=30.0,
+)
+MOCK_PS_I = BandCfg(
+    name='PSS.DR4',
+    band='i',
+    vos='vos:cfis/panstarrs/DR4/resamp',
+    suffix='.i.fits',
+    delimiter='.',
+    fits_ext=0,
+    zfill=3,
+    zp=30.0,
+)
 
 # A mock bands dictionary for testing purposes
-MOCK_BANDS_DICT: dict[str, BandDict] = {
+MOCK_BANDS_DICT: dict[str, BandCfg] = {
     'whigs-g': MOCK_WHIGS_G,
     'cfis_lsb-r': MOCK_CFIS_LSB_R,
     'ps-i': MOCK_PS_I,

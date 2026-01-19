@@ -29,7 +29,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from unionsdata.config import BandDict, CutoutsCfg
+from unionsdata.config import BandCfg, CutoutsCfg
 from unionsdata.cutouts import CutoutResult, create_cutouts_for_tile, worker_log_init
 from unionsdata.stats import RunStatistics
 from unionsdata.utils import decompress_fits, split_by_tile, tile_str
@@ -113,7 +113,7 @@ class ProgressTracker:
 
 def fetch_expected_sizes(
     jobs: list[tuple[tuple[int, int], str]],
-    band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
     download_dir: Path,
     cert_path: Path,
     max_workers: int = 8,
@@ -223,7 +223,7 @@ class TileBandSpec(TypedDict):
 
 def tile_band_specs(
     tile: tuple[int, int],
-    in_dict: dict[str, BandDict],
+    in_dict: dict[str, BandCfg],
     band: str,
     download_dir: Path,
     cutout_mode: str = 'disabled',
@@ -241,13 +241,13 @@ def tile_band_specs(
     Returns:
         dict: tile_fitsfilename, file_path after download complete, temp_path while download ongoing, vos_path (path to file on server), fits extension of the data, zero point
     """
-    vos_dir = in_dict[band]['vos']
-    prefix = in_dict[band]['name']
-    suffix = in_dict[band]['suffix']
-    delimiter = in_dict[band]['delimiter']
-    zfill = in_dict[band]['zfill']
-    fits_ext = in_dict[band]['fits_ext']
-    zp = in_dict[band]['zp']
+    vos_dir = in_dict[band].vos
+    prefix = in_dict[band].name
+    suffix = in_dict[band].suffix
+    delimiter = in_dict[band].delimiter
+    zfill = in_dict[band].zfill
+    fits_ext = in_dict[band].fits_ext
+    zp = in_dict[band].zp
 
     tile_dir = Path(download_dir) / f'{tile[0]:0>3}_{tile[1]:0>3}'
     tile_dir.mkdir(parents=True, exist_ok=True)
@@ -509,8 +509,8 @@ def download_tile_one_band(
 
 def download_worker(
     download_queue: Queue[tuple[tuple[int, int], str]],
-    band_dictionary: dict[str, BandDict],
-    all_band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
+    all_band_dictionary: dict[str, BandCfg],
     download_dir: Path,
     shutdown_flag: Event,
     requested_bands: set[str],
@@ -710,8 +710,8 @@ def download_worker(
 
 def download_tiles(
     tiles_to_download: list[tuple[tuple[int, int], str]],
-    band_dictionary: dict[str, BandDict],
-    all_band_dictionary: dict[str, BandDict],
+    band_dictionary: dict[str, BandCfg],
+    all_band_dictionary: dict[str, BandCfg],
     download_dir: Path,
     requested_bands: set[str],
     num_threads: int,

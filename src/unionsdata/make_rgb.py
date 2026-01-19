@@ -6,7 +6,7 @@ import pywt
 from numpy.typing import NDArray
 from scipy.ndimage import binary_dilation, label
 
-from unionsdata.config import BandDict
+from unionsdata.config import BandCfg
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def preprocess_cutout(
     cutout: NDArray[np.float32],
     bands: list[str],
-    in_dict: dict[str, BandDict],
+    in_dict: dict[str, BandCfg],
     standard_zp: float = 30.0,
 ) -> NDArray[np.float32]:
     """Create an RGB image from the cutout data and save or plot it.
@@ -60,17 +60,17 @@ def preprocess_cutout(
 
     # Apply flux adjustments to standard zero-point
     if np.count_nonzero(cutout_red) > 0:
-        current_zp = in_dict[red_band]['zp']
+        current_zp = in_dict[red_band].zp
         if current_zp != standard_zp:
             cutout_red = adjust_flux_with_zp(cutout_red, current_zp, standard_zp)
 
     if np.count_nonzero(cutout_green) > 0:
-        current_zp = in_dict[green_band]['zp']
+        current_zp = in_dict[green_band].zp
         if current_zp != standard_zp:
             cutout_green = adjust_flux_with_zp(cutout_green, current_zp, standard_zp)
 
     if np.count_nonzero(cutout_blue) > 0:
-        current_zp = in_dict[blue_band]['zp']
+        current_zp = in_dict[blue_band].zp
         if current_zp != standard_zp:
             cutout_blue = adjust_flux_with_zp(cutout_blue, current_zp, standard_zp)
 

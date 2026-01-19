@@ -17,7 +17,7 @@ from astropy.wcs.utils import skycoord_to_pixel
 from numpy.typing import NDArray
 from vos import Client
 
-from unionsdata.config import BandDict, InputsCfg
+from unionsdata.config import BandCfg, InputsCfg
 from unionsdata.kd_tree import TileWCS, build_tree, query_tree, relate_coord_tile
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class TileAvailability:
     def __init__(
         self,
         tile_nums: list[list[tuple[int, int]]],
-        in_dict: dict[str, BandDict],
+        in_dict: dict[str, BandCfg],
         at_least: bool = False,
     ) -> None:
         """Initialize tile availability tracker.
@@ -49,7 +49,7 @@ class TileAvailability:
         )
         self.availability_matrix: NDArray[np.int_] = self._create_availability_matrix()
         self.counts: dict[int, int] = self._calculate_counts(at_least)
-        self.band_dict: dict[str, BandDict] = in_dict
+        self.band_dict: dict[str, BandCfg] = in_dict
 
     def _create_availability_matrix(self) -> NDArray[np.int_]:
         """Create binary matrix of tile availability per band."""
@@ -277,7 +277,7 @@ def get_tile_numbers(name: str) -> tuple[int, int]:
 
 
 def extract_tile_numbers(
-    tile_dict: dict[str, NDArray[np.str_]], in_dict: dict[str, BandDict]
+    tile_dict: dict[str, NDArray[np.str_]], in_dict: dict[str, BandCfg]
 ) -> list[list[tuple[int, int]]]:
     """
     Extract tile numbers from .fits file names.
@@ -299,7 +299,7 @@ def extract_tile_numbers(
     return num_lists
 
 
-def load_available_tiles(path: Path, in_dict: dict[str, BandDict]) -> dict[str, NDArray[np.str_]]:
+def load_available_tiles(path: Path, in_dict: dict[str, BandCfg]) -> dict[str, NDArray[np.str_]]:
     """
     Load tile lists from disk.
     Args:
@@ -318,7 +318,7 @@ def load_available_tiles(path: Path, in_dict: dict[str, BandDict]) -> dict[str, 
     return band_tiles
 
 
-def update_available_tiles(path: Path, in_dict: dict[str, BandDict], save: bool = True) -> None:
+def update_available_tiles(path: Path, in_dict: dict[str, BandCfg], save: bool = True) -> None:
     """
     Update available tile lists from the VOSpace. Takes a few mins to run.
 
@@ -332,12 +332,12 @@ def update_available_tiles(path: Path, in_dict: dict[str, BandDict], save: bool 
     """
 
     for band in np.array(list(in_dict.keys())):
-        vos_dir = in_dict[band]['vos']
-        band_filter = in_dict[band]['band']
-        prefix = in_dict[band]['name']
-        delimiter = in_dict[band]['delimiter']
-        suffix = in_dict[band]['suffix']
-        zfill = in_dict[band]['zfill']
+        vos_dir = in_dict[band].vos
+        band_filter = in_dict[band].band
+        prefix = in_dict[band].name
+        delimiter = in_dict[band].delimiter
+        suffix = in_dict[band].suffix
+        zfill = in_dict[band].zfill
 
         start_fetch = time.time()
         try:
@@ -368,7 +368,7 @@ def update_available_tiles(path: Path, in_dict: dict[str, BandDict], save: bool 
 
 def query_availability(
     update: bool,
-    in_dict: dict[str, BandDict],
+    in_dict: dict[str, BandCfg],
     show_stats: bool,
     tile_info_dir: Path,
 ) -> tuple[TileAvailability, list[list[tuple[int, int]]]]:
@@ -673,7 +673,7 @@ def get_dataset(f: h5py.File, key: str) -> h5py.Dataset:
     return cast(h5py.Dataset, f[key])
 
 
-def get_bands_short_string(bands: list[str], band_dict: dict[str, BandDict]) -> str:
+def get_bands_short_string(bands: list[str], band_dict: dict[str, BandCfg]) -> str:
     """
     Get short string representation of bands for filename.
 
@@ -684,7 +684,7 @@ def get_bands_short_string(bands: list[str], band_dict: dict[str, BandDict]) -> 
     Returns:
         Concatenated band letters (e.g., 'gri')
     """
-    return ''.join(band_dict[b]['band'] for b in bands)
+    return ''.join(band_dict[b].band for b in bands)
 
 
 def load_existing_catalog(inputs: InputsCfg, tables_dir: Path) -> tuple[pd.DataFrame | None, Path]:
@@ -886,7 +886,7 @@ def filter_for_processing(
 def update_catalog(
     catalog: pd.DataFrame,
     successful_bands_map: dict[str, set[str]],
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
     col_name: str = 'cutout_bands',
 ) -> pd.DataFrame:
     """
@@ -940,7 +940,7 @@ def update_catalog(
 def update_bands_downloaded(
     catalog: pd.DataFrame,
     tile_progress: dict[str, set[str]],
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
 ) -> pd.DataFrame:
     """
     Update 'bands_downloaded' column based on tile-level success.
@@ -997,7 +997,7 @@ def process_download_results(
     tile_progress: dict[str, set[str]],
     cutout_success_map: dict[str, set[str]],
     cutouts_enabled: bool,
-    band_dict: dict[str, BandDict],
+    band_dict: dict[str, BandCfg],
 ) -> pd.DataFrame:
     """
     Process results from download_tiles and update catalog columns.
@@ -1038,7 +1038,7 @@ def process_download_results(
     return catalog
 
 
-def get_wavelength_order(bands: list[str], band_dictionary: dict[str, BandDict]) -> list[str]:
+def get_wavelength_order(bands: list[str], band_dictionary: dict[str, BandCfg]) -> list[str]:
     """
     Sort bands by wavelength order using the band dictionary's key order.
 

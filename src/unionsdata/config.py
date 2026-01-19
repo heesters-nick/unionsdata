@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.metadata import distribution
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -157,19 +157,6 @@ class BandCfg(BaseModel):
     """Band-specific configuration."""
 
     model_config = ConfigDict(extra='forbid')
-    name: str
-    band: str
-    vos: str
-    suffix: str
-    delimiter: str
-    fits_ext: int
-    zfill: int
-    zp: float
-
-
-class BandDict(TypedDict):
-    """Dictionary representation of band configuration (for legacy compatibility)."""
-
     name: str
     band: str
     vos: str
