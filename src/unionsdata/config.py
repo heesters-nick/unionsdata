@@ -267,10 +267,7 @@ class Settings(BaseModel):
         if not self.paths.cert_path.exists():
             raise ValueError(f'Certificate file does not exist: {self.paths.cert_path}')
 
-        try:
-            check_cert_expiry(self.paths.cert_path)
-        except ValueError:
-            sys.exit(1)
+        check_cert_expiry(self.paths.cert_path)
 
         return self
 
