@@ -669,8 +669,11 @@ def read_h5(
 
 
 def get_dataset(f: h5py.File, key: str) -> h5py.Dataset:
-    """Helper to cast h5py file access to Dataset type."""
-    return cast(h5py.Dataset, f[key])
+    """Get a dataset from an HDF5 file, with runtime validation."""
+    obj = f[key]
+    if not isinstance(obj, h5py.Dataset):
+        raise TypeError(f"Expected Dataset at '{key}', got {type(obj).__name__}")
+    return obj
 
 
 def get_bands_short_string(bands: list[str], band_dict: dict[str, BandCfg]) -> str:
