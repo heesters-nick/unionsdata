@@ -42,6 +42,7 @@ from unionsdata.stats import (
     compute_cutout_skipped,
     compute_tile_availability_from_catalog,
     compute_tile_availability_from_tiles,
+    compute_tile_skipped,
     report_summary,
 )
 from unionsdata.tui import run_config_editor
@@ -225,6 +226,7 @@ def run_download(args: argparse.Namespace) -> None:
 
         # Compute availability statistics
         compute_tile_availability_from_catalog(catalog, bands, run_stats)
+        compute_tile_skipped(catalog, bands, run_stats)
         if cutouts_enabled:
             compute_cutout_availability(catalog, bands, run_stats)
             compute_cutout_skipped(catalog, bands, run_stats)

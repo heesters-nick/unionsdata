@@ -16,7 +16,7 @@ logging:
 runtime:
   n_download_threads: 24
   n_cutout_processes: 2
-  bands: ['cfis-u', 'ps-i', 'whigs-g', 'cfis_lsb-r']               # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
+  bands: ['cfis-u', 'ps-i', 'whigs-g']                             # "cfis-u", "whigs-g", "cfis_lsb-r", "ps-i", "wishes-z"
   resume: false
   max_retries: 5                                                   # maximum number of download retries per file
 
@@ -27,14 +27,14 @@ tiles:
   require_all_specified_bands: false                               # if true, only download tiles available in ALL specified bands
 
 cutouts:
-  mode: "direct_only"                                              # disabled | after_download | direct_only
+  mode: "after_download"                                              # disabled | after_download | direct_only
   size_pix: 512                                                    # size of cutout in pixels, pixel scale: 0.1857 arcsec/pix
   output_subdir: "cutouts"                                         # subdirectory under tile directory to save cutouts
 
 plotting:
   enable: true                                                     # create plots of cutouts
   catalog_name: 'auto'                                             # 'auto' to use most recent augmented catalog, or specify name
-  bands: ['cfis-u', 'cfis-r', 'ps-i']                              # bands to use for RGB cutouts
+  bands: ['cfis-u', 'whigs-g', 'ps-i']                              # bands to use for RGB cutouts
   size_pix: 512                                                    # square size of cutouts in pixels
   mode: "grid"                                                     # grid | channel
   max_cols: 7                                                      # max columns for grid mode

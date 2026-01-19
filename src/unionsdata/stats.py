@@ -249,6 +249,31 @@ def compute_cutout_skipped(
         stats.cutout_processing[band].skipped = skipped_count
 
 
+def compute_tile_skipped(
+    catalog: pd.DataFrame,
+    bands: list[str],
+    stats: RunStatistics,
+) -> None:
+    """
+    Compute skipped tile counts from catalog's existing bands_downloaded.
+    """
+    if catalog.empty or 'bands_downloaded' not in catalog.columns:
+        return
+
+    # Iterate over unique tiles to avoid double counting objects in the same tile
+    unique_tiles = catalog.drop_duplicates(subset=['tile'])
+
+    for band in bands:
+        skipped_count = 0
+        for downloaded_str in unique_tiles['bands_downloaded']:
+            if pd.notna(downloaded_str) and downloaded_str:
+                existing_bands = set(str(downloaded_str).split(','))
+                if band in existing_bands:
+                    skipped_count += 1
+
+        stats.tile_processing[band].skipped = skipped_count
+
+
 def report_summary(
     stats: RunStatistics,
     cutouts_enabled: bool,

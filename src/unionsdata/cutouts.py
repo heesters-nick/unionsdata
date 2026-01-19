@@ -534,7 +534,7 @@ def process_catalog_in_batches(
     output_path: Path,
     cutout_size: int,
     batch_size: int = DEFAULT_BATCH_SIZE,
-) -> tuple[set[str], list[str]]:
+) -> tuple[set[str], list[str], int]:
     """Load tile FITS data and create cutouts for a catalog of objects.
 
     Processes objects in batches to manage memory, writing to HDF5 incrementally.
@@ -550,10 +550,10 @@ def process_catalog_in_batches(
         batch_size: Number of objects per batch
 
     Returns:
-        Tuple of (set of object IDs successfully processed, list of bands actually loaded)
+        Tuple of (set of object IDs successfully processed, list of bands actually loaded, failed count)
     """
     if catalog.empty:
-        return set(), []
+        return set(), [], 0
 
     tile_key = tile_str(tile)
 
@@ -567,14 +567,15 @@ def process_catalog_in_batches(
         )
     except ValueError as e:
         logger.warning(f'Tile {tile_key}: {e}')
-        return set(), []
+        return set(), [], 0
 
     if not loaded_bands:
         logger.warning(f'Tile {tile_key}: No bands could be loaded')
-        return set(), []
+        return set(), [], 0
 
     # Process in batches
     processed_ids: set[str] = set()
+    failed_count: int = 0
 
     for start_idx in range(0, len(catalog), batch_size):
         end_idx = min(start_idx + batch_size, len(catalog))
@@ -602,9 +603,10 @@ def process_catalog_in_batches(
 
         except Exception as e:
             logger.error(f'Tile {tile_key}: Batch {start_idx}-{end_idx} failed: {e}')
+            failed_count += len(batch_df)
             continue
 
-    return processed_ids, loaded_bands
+    return processed_ids, loaded_bands, failed_count
 
 
 # ========== Case Handlers ==========
@@ -635,7 +637,7 @@ def handle_new_file(
 
     logger.debug(f'Tile {tile_key}: Creating new file with {len(catalog)} objects')
 
-    processed_ids, loaded_bands = process_catalog_in_batches(
+    processed_ids, loaded_bands, failed_count = process_catalog_in_batches(
         tile=tile,
         tile_dir=tile_dir,
         catalog=catalog,
@@ -653,7 +655,7 @@ def handle_new_file(
     # Update band stats
     n_processed = len(processed_ids)
     for band in loaded_bands:
-        results.record_band_stats(band, succeeded=n_processed)
+        results.record_band_stats(band, succeeded=n_processed, failed=failed_count)
 
 
 def handle_add_bands(
@@ -769,7 +771,7 @@ def handle_new_objects(
     n_new = len(new_catalog)
     logger.debug(f'Tile {tile_key}: Appending {n_new} new objects')
 
-    processed_ids, loaded_bands = process_catalog_in_batches(
+    processed_ids, loaded_bands, failed_count = process_catalog_in_batches(
         tile=tile,
         tile_dir=tile_dir,
         catalog=new_catalog,
@@ -787,7 +789,7 @@ def handle_new_objects(
     # Update band stats
     n_processed = len(processed_ids)
     for band in loaded_bands:
-        results.record_band_stats(band, succeeded=n_processed)
+        results.record_band_stats(band, succeeded=n_processed, failed=failed_count)
 
 
 # ========== Main Entry Point ==========

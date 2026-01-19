@@ -78,6 +78,17 @@ class StreamingStats:
             self.failed += 1
             self.band_failed[band] = self.band_failed.get(band, 0) + 1
 
+    def revert_success_to_failure(self, band: str, count: int = 1) -> None:
+        """Move counts from success to failure (used when file writing fails)."""
+        with self._lock:
+            # Decrement success
+            self.succeeded = max(0, self.succeeded - count)
+            self.band_succeeded[band] = max(0, self.band_succeeded.get(band, 0) - count)
+
+            # Increment failure
+            self.failed += count
+            self.band_failed[band] = self.band_failed.get(band, 0) + count
+
 
 def check_cutout_availability(catalog: pd.DataFrame, bands: list[str]) -> int:
     """
@@ -548,7 +559,7 @@ def stream_direct_cutouts(
                 for tile_key in chunk['tile'].unique():
                     tile_chunk = chunk[chunk['tile'] == tile_key]
 
-                    save_results_by_tile(
+                    success = save_results_by_tile(
                         results=results,
                         catalog=tile_chunk,
                         bands=bands,
@@ -557,6 +568,15 @@ def stream_direct_cutouts(
                         cutout_subdir=cutout_subdir,
                         cutout_size=cutout_size,
                     )
+
+                    if not success:
+                        valid_ids = tile_chunk['ID'].astype(str)
+
+                        for obj_id in valid_ids:
+                            if obj_id in results:
+                                for band in results[obj_id]:
+                                    # revert the success to a failure
+                                    stats.revert_success_to_failure(band)
 
                 with results_lock:
                     for obj_id_str, bands_data in results.items():
@@ -591,7 +611,7 @@ def save_results_by_tile(
     download_dir: Path,
     cutout_subdir: str,
     cutout_size: int,
-) -> None:
+) -> bool:
     """
     Save cutouts to HDF5. Handles creating new files or updating existing ones.
 
@@ -605,12 +625,12 @@ def save_results_by_tile(
         cutout_size: Size of square cutouts in pixels
 
     Returns:
-        None
+        True if save was successful, False otherwise
     """
     # Filter catalog to objects we actually have results for
     valid_mask = catalog['ID'].astype(str).isin(results.keys())
     if not valid_mask.any():
-        return
+        return True
 
     tile_catalog = catalog[valid_mask].reset_index(drop=True)
     tile_key = tile_catalog['tile'].iloc[0]
@@ -640,11 +660,26 @@ def save_results_by_tile(
     try:
         existing_info = analyze_existing_file(output_path)
 
+        # Handle corruption: file exists on disk but HDF5 analysis failed
+        if output_path.exists() and not existing_info.exists:
+            logger.warning(
+                f'Tile {tile_key}: Output file exists but appears corrupt. '
+                f'Deleting and recreating: {output_path}'
+            )
+            try:
+                output_path.unlink()
+            except OSError as e:
+                logger.error(f'Failed to delete corrupt file {output_path}: {e}')
+                return False
+
+            # Reset info after deletion
+            existing_info = analyze_existing_file(output_path)
+
         # Case 1: new file
         if not existing_info.exists:
             data = get_data_array(tile_catalog, bands)
             write_to_h5(output_path, data, tile_catalog, bands, tile_key, band_dict)
-            return
+            return True
 
         # Case 2: existing file (update/append)
         # Determine new vs existing bands
@@ -675,8 +710,9 @@ def save_results_by_tile(
             data = get_data_array(new_df, bands)
             write_to_h5(output_path, data, new_df, bands, tile_key, band_dict)
 
+        return True
+
     except (OSError, ValueError, RuntimeError) as e:
         # Catch locking errors, disk full, or corrupt HDF5 files
-        # We log and return 0 so the stream doesn't crash
         logger.error(f'Failed to save cutouts to {output_path}: {e}')
-        return
+        return False

@@ -967,8 +967,9 @@ def download_tiles(
                 # Process collected results
                 for tile_key, result in collected_results.items():
                     if isinstance(result, Exception):
+                        failed_count = len(tile_catalogs.get(tile_key, []))
                         for band in requested_bands:
-                            run_stats.record_cutout_result(band, failed=1)
+                            run_stats.record_cutout_result(band, failed=failed_count)
                         logger.error(f'❌ Cutouts failed for tile {tile_key}: {result}')
                         continue
 
