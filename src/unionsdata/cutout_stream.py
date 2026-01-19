@@ -558,14 +558,11 @@ def stream_direct_cutouts(
                         cutout_size=cutout_size,
                     )
 
-                # Update success map
-                for obj_id_str, bands_data in results.items():
-                    if obj_id_str not in cutout_success_map:
-                        cutout_success_map[obj_id_str] = set()
-                    cutout_success_map[obj_id_str].update(bands_data.keys())
-
-                # Clear results for next batch
                 with results_lock:
+                    for obj_id_str, bands_data in results.items():
+                        if obj_id_str not in cutout_success_map:
+                            cutout_success_map[obj_id_str] = set()
+                        cutout_success_map[obj_id_str].update(bands_data.keys())
                     results.clear()
 
     except KeyboardInterrupt:

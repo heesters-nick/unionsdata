@@ -282,13 +282,13 @@ def mock_cutout_creation(mocker):
         future = Future()
 
         # Extract catalog from kwargs to return realistic count
-        catalog = kwargs.get('catalog')
-        if catalog is not None and not catalog.empty:
-            n_cutouts = len(catalog)
-        else:
-            n_cutouts = 0
+        # catalog = kwargs.get('catalog')
+        # if catalog is not None and not catalog.empty:
+        #     n_cutouts = len(catalog)
+        # else:
+        #     n_cutouts = 0
 
-        future.set_result(CutoutResult(n_cutouts, 0, {}))  # Return actual catalog size
+        future.set_result(CutoutResult({}, {}))  # Return actual catalog size
         return future
 
     mock_executor = mocker.MagicMock()

@@ -50,6 +50,7 @@ from unionsdata.utils import (
     TileAvailability,
     clean_process_columns,
     filter_for_processing,
+    get_wavelength_order,
     input_to_tile_list,
     jobs_from_catalog,
     jobs_from_tiles,
@@ -168,6 +169,9 @@ def run_download(args: argparse.Namespace) -> None:
         k: cast(BandDict, cfg.bands[k].model_dump(mode='python'))
         for k in cfg.bands.keys()  # ALL bands, not just cfg.runtime.bands
     }
+
+    # sort bands by wavelength
+    bands = get_wavelength_order(bands, all_band_dict)
 
     # filter considered bands from the full band dictionary
     selected_band_dict: dict[str, BandDict] = {

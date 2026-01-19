@@ -18,6 +18,9 @@ from unionsdata.utils import get_dataset, get_wavelength_order, open_fits, tile_
 
 logger = logging.getLogger(__name__)
 
+# Default batch size for processing cutouts
+DEFAULT_BATCH_SIZE = 1000
+
 
 # ========== Helper Functions ==========
 
@@ -54,6 +57,89 @@ class ExistingFileInfo:
     n_objects: int
     object_coords: NDArray[np.float32] | None  # shape (n, 2) for ra, dec
     cutout_shape: tuple[int, ...] | None  # (n_objects, n_bands, h, w)
+
+
+@dataclass
+class CutoutPlan:
+    """Plan describing what cutout operations need to be performed."""
+
+    create_new_file: bool
+    bands_to_add_to_existing: list[str]
+    matched_catalog: pd.DataFrame  # Objects matching existing HDF5, with 'h5_index' column
+    new_objects_catalog: pd.DataFrame  # Objects not in existing HDF5
+    bands_for_new_objects: list[str]  # Full band list for new objects
+    existing_info: ExistingFileInfo
+
+
+class CutoutResultBuilder:
+    """Accumulates cutout results during processing."""
+
+    def __init__(self, bands: list[str]) -> None:
+        """Initialize tracking structures for the given bands.
+
+        Args:
+            bands: List of band names to track
+        """
+        self._object_bands: dict[str, set[str]] = {}
+        self._band_stats: dict[str, dict[str, int]] = {
+            band: {'succeeded': 0, 'skipped': 0, 'failed': 0} for band in bands
+        }
+        self._bands = bands
+
+    def record_object_success(self, object_id: str, bands: set[str]) -> None:
+        """Record successful cutout creation for an object.
+
+        Args:
+            object_id: The object identifier
+            bands: Set of bands successfully created for this object
+        """
+        if object_id not in self._object_bands:
+            self._object_bands[object_id] = set()
+        self._object_bands[object_id].update(bands)
+
+    def record_band_stats(
+        self, band: str, succeeded: int = 0, skipped: int = 0, failed: int = 0
+    ) -> None:
+        """Increment per-band counters.
+
+        Args:
+            band: Band name
+            succeeded: Number of successful cutouts to add
+            skipped: Number of skipped cutouts to add
+            failed: Number of failed cutouts to add
+        """
+        if band not in self._band_stats:
+            self._band_stats[band] = {'succeeded': 0, 'skipped': 0, 'failed': 0}
+        self._band_stats[band]['succeeded'] += succeeded
+        self._band_stats[band]['skipped'] += skipped
+        self._band_stats[band]['failed'] += failed
+
+    def merge(self, other: 'CutoutResultBuilder') -> None:
+        """Combine results from another builder into this one.
+
+        Args:
+            other: Another CutoutResultBuilder to merge in
+        """
+        for obj_id, bands in other._object_bands.items():
+            self.record_object_success(obj_id, bands)
+        for band, stats in other._band_stats.items():
+            self.record_band_stats(
+                band,
+                succeeded=stats['succeeded'],
+                skipped=stats['skipped'],
+                failed=stats['failed'],
+            )
+
+    def build(self) -> CutoutResult:
+        """Finalize and return immutable result.
+
+        Returns:
+            CutoutResult containing accumulated data
+        """
+        return CutoutResult(
+            object_bands=dict(self._object_bands),
+            band_stats=dict(self._band_stats),
+        )
 
 
 def analyze_existing_file(output_path: Path) -> ExistingFileInfo:
@@ -137,6 +223,98 @@ def match_objects_by_coords(
     is_match = d2d < threshold
 
     return np.array(is_match), np.array(idx, dtype=np.intp)
+
+
+def match_catalog_to_existing(
+    catalog: pd.DataFrame,
+    existing_info: ExistingFileInfo,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Determine which catalog objects already exist in the HDF5 file.
+
+    Args:
+        catalog: Input catalog with 'ra', 'dec' columns
+        existing_info: Information about existing HDF5 file
+
+    Returns:
+        Tuple of:
+            - matched: DataFrame of rows that matched, with added 'h5_index' column
+            - unmatched: DataFrame of rows that didn't match
+    """
+    if not existing_info.exists or existing_info.object_coords is None:
+        # No existing file or no objects in it
+        empty_matched = catalog.iloc[:0].copy()
+        empty_matched['h5_index'] = pd.Series(dtype=np.intp)
+        return empty_matched, catalog.copy()
+
+    # Build coordinate arrays from catalog
+    catalog_coords = np.column_stack([catalog['ra'].to_numpy(), catalog['dec'].to_numpy()]).astype(
+        np.float32
+    )
+
+    # Match against existing
+    is_match, match_indices = match_objects_by_coords(catalog_coords, existing_info.object_coords)
+
+    # Split catalog
+    matched = catalog[is_match].copy()
+    matched['h5_index'] = match_indices[is_match]
+
+    unmatched = catalog[~is_match].copy()
+
+    return matched.reset_index(drop=True), unmatched.reset_index(drop=True)
+
+
+def plan_cutout_operations(
+    catalog: pd.DataFrame,
+    requested_bands: list[str],
+    existing_info: ExistingFileInfo,
+    all_band_dictionary: dict[str, BandDict],
+) -> CutoutPlan:
+    """Analyze the situation and produce a plan for cutout operations.
+
+    This function makes no I/O calls - it only analyzes and computes.
+
+    Args:
+        catalog: Full input catalog for this tile
+        requested_bands: Bands user wants this run
+        existing_info: State of existing HDF5 file
+        all_band_dictionary: For wavelength ordering
+
+    Returns:
+        CutoutPlan describing what operations need to be performed
+    """
+    # Case 1: No existing file
+    if not existing_info.exists:
+        empty_matched = catalog.iloc[:0].copy()
+        empty_matched['h5_index'] = pd.Series(dtype=np.intp)
+
+        return CutoutPlan(
+            create_new_file=True,
+            bands_to_add_to_existing=[],
+            matched_catalog=empty_matched,
+            new_objects_catalog=catalog.copy(),
+            bands_for_new_objects=requested_bands,
+            existing_info=existing_info,
+        )
+
+    # Case 2 & 3: File exists
+    matched, unmatched = match_catalog_to_existing(catalog, existing_info)
+
+    # Determine which bands are new
+    existing_bands_set = set(existing_info.bands)
+    bands_to_add = [b for b in requested_bands if b not in existing_bands_set]
+
+    # New objects need all bands (existing + requested) for uniform coverage
+    all_bands = list(existing_bands_set | set(requested_bands))
+    bands_for_new_objects = get_wavelength_order(all_bands, all_band_dictionary)
+
+    return CutoutPlan(
+        create_new_file=False,
+        bands_to_add_to_existing=bands_to_add,
+        matched_catalog=matched,
+        new_objects_catalog=unmatched,
+        bands_for_new_objects=bands_for_new_objects,
+        existing_info=existing_info,
+    )
 
 
 # ========= Core Functions ==========
@@ -344,6 +522,277 @@ def merge_bands_into_h5(
     logger.debug(f'Merged {len(new_bands)} new bands into {output_path}')
 
 
+# ========= Batch processing ==========
+
+
+def process_catalog_in_batches(
+    tile: tuple[int, int],
+    tile_dir: Path,
+    catalog: pd.DataFrame,
+    bands: list[str],
+    band_dictionary: dict[str, BandDict],
+    output_path: Path,
+    cutout_size: int,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> tuple[set[str], list[str]]:
+    """Load tile FITS data and create cutouts for a catalog of objects.
+
+    Processes objects in batches to manage memory, writing to HDF5 incrementally.
+
+    Args:
+        tile: Tile coordinates (x, y)
+        tile_dir: Directory containing band subdirectories with FITS files
+        catalog: Objects to process (must have x, y, ID, ra, dec columns)
+        bands: Bands to create cutouts for
+        band_dictionary: Band configuration dictionary
+        output_path: HDF5 file to write to
+        cutout_size: Size of cutouts in pixels
+        batch_size: Number of objects per batch
+
+    Returns:
+        Tuple of (set of object IDs successfully processed, list of bands actually loaded)
+    """
+    if catalog.empty:
+        return set(), []
+
+    tile_key = tile_str(tile)
+
+    # Load FITS data for all requested bands
+    try:
+        multiband_data, loaded_bands = read_band_data(
+            tile_dir=tile_dir,
+            tile=tile,
+            bands=bands,
+            in_dict=band_dictionary,
+        )
+    except ValueError as e:
+        logger.warning(f'Tile {tile_key}: {e}')
+        return set(), []
+
+    if not loaded_bands:
+        logger.warning(f'Tile {tile_key}: No bands could be loaded')
+        return set(), []
+
+    # Process in batches
+    processed_ids: set[str] = set()
+
+    for start_idx in range(0, len(catalog), batch_size):
+        end_idx = min(start_idx + batch_size, len(catalog))
+        batch_df = catalog.iloc[start_idx:end_idx].reset_index(drop=True)
+
+        try:
+            batch_cutouts = make_multiband_cutouts(
+                multiband_data=multiband_data,
+                tile_str=tile_key,
+                df=batch_df,
+                cutout_size=cutout_size,
+            )
+
+            write_to_h5(
+                output_path=output_path,
+                cutouts=batch_cutouts,
+                catalog=batch_df,
+                bands=loaded_bands,
+                tile_key=tile_key,
+                band_dictionary=band_dictionary,
+            )
+
+            # Record successful IDs
+            processed_ids.update(batch_df['ID'].astype(str).tolist())
+
+        except Exception as e:
+            logger.error(f'Tile {tile_key}: Batch {start_idx}-{end_idx} failed: {e}')
+            continue
+
+    return processed_ids, loaded_bands
+
+
+# ========== Case Handlers ==========
+
+
+def handle_new_file(
+    plan: CutoutPlan,
+    tile: tuple[int, int],
+    tile_dir: Path,
+    output_path: Path,
+    band_dictionary: dict[str, BandDict],
+    cutout_size: int,
+    results: CutoutResultBuilder,
+) -> None:
+    """Handle Case 1: Create a new HDF5 file with cutouts for all objects.
+
+    Args:
+        plan: The cutout plan
+        tile: Tile coordinates
+        tile_dir: Directory containing FITS files
+        output_path: Path for new HDF5 file
+        band_dictionary: Band configuration
+        cutout_size: Size of cutouts in pixels
+        results: Builder to accumulate results
+    """
+    tile_key = tile_str(tile)
+    catalog = plan.new_objects_catalog
+
+    logger.debug(f'Tile {tile_key}: Creating new file with {len(catalog)} objects')
+
+    processed_ids, loaded_bands = process_catalog_in_batches(
+        tile=tile,
+        tile_dir=tile_dir,
+        catalog=catalog,
+        bands=plan.bands_for_new_objects,
+        band_dictionary=band_dictionary,
+        output_path=output_path,
+        cutout_size=cutout_size,
+    )
+
+    # Record results
+    loaded_bands_set = set(loaded_bands)
+    for obj_id in processed_ids:
+        results.record_object_success(obj_id, loaded_bands_set)
+
+    # Update band stats
+    n_processed = len(processed_ids)
+    for band in loaded_bands:
+        results.record_band_stats(band, succeeded=n_processed)
+
+
+def handle_add_bands(
+    plan: CutoutPlan,
+    tile: tuple[int, int],
+    tile_dir: Path,
+    output_path: Path,
+    band_dictionary: dict[str, BandDict],
+    cutout_size: int,
+    results: CutoutResultBuilder,
+) -> ExistingFileInfo:
+    """Handle Case 2: Add new bands to existing objects in HDF5.
+
+    Args:
+        plan: The cutout plan
+        tile: Tile coordinates
+        tile_dir: Directory containing FITS files
+        output_path: Path to existing HDF5 file
+        band_dictionary: Band configuration
+        cutout_size: Size of cutouts in pixels
+        results: Builder to accumulate results
+
+    Returns:
+        Updated ExistingFileInfo after merge (bands have changed)
+    """
+    tile_key = tile_str(tile)
+    matched_catalog = plan.matched_catalog
+    new_bands = plan.bands_to_add_to_existing
+
+    if not new_bands or matched_catalog.empty:
+        return plan.existing_info
+
+    n_matched = len(matched_catalog)
+    logger.debug(f'Tile {tile_key}: Adding bands {new_bands} to {n_matched} existing objects')
+
+    # Load FITS data for new bands only
+    try:
+        multiband_data, loaded_new_bands = read_band_data(
+            tile_dir=tile_dir,
+            tile=tile,
+            bands=new_bands,
+            in_dict=band_dictionary,
+        )
+    except ValueError as e:
+        logger.warning(f'Tile {tile_key}: Failed to load new bands: {e}')
+        return plan.existing_info
+
+    if not loaded_new_bands:
+        return plan.existing_info
+
+    # Create cutouts for matched objects in new bands
+    new_band_cutouts = make_multiband_cutouts(
+        multiband_data=multiband_data,
+        tile_str=tile_key,
+        df=matched_catalog,
+        cutout_size=cutout_size,
+    )
+
+    # Get HDF5 indices for matched objects
+    matched_h5_indices = matched_catalog['h5_index'].to_numpy(dtype=np.intp)
+
+    # Merge into HDF5
+    merge_bands_into_h5(
+        output_path=output_path,
+        new_cutouts=new_band_cutouts,
+        new_bands=loaded_new_bands,
+        existing_info=plan.existing_info,
+        match_indices=matched_h5_indices,
+        band_dictionary=band_dictionary,
+    )
+
+    # Re-read existing_info after merge - bands have changed
+    updated_info = analyze_existing_file(output_path)
+
+    # Record results - matched objects now have all merged bands
+    merged_bands_set = set(updated_info.bands)
+    for obj_id in matched_catalog['ID'].astype(str):
+        results.record_object_success(obj_id, merged_bands_set)
+
+    # Update band stats for new bands
+    for band in loaded_new_bands:
+        results.record_band_stats(band, succeeded=n_matched)
+
+    return updated_info
+
+
+def handle_new_objects(
+    plan: CutoutPlan,
+    tile: tuple[int, int],
+    tile_dir: Path,
+    output_path: Path,
+    band_dictionary: dict[str, BandDict],
+    cutout_size: int,
+    results: CutoutResultBuilder,
+) -> None:
+    """Handle Case 3: Append new objects to existing HDF5.
+
+    Args:
+        plan: The cutout plan
+        tile: Tile coordinates
+        tile_dir: Directory containing FITS files
+        output_path: Path to existing HDF5 file
+        band_dictionary: Band configuration
+        cutout_size: Size of cutouts in pixels
+        results: Builder to accumulate results
+    """
+    tile_key = tile_str(tile)
+    new_catalog = plan.new_objects_catalog
+
+    if new_catalog.empty:
+        return
+
+    n_new = len(new_catalog)
+    logger.debug(f'Tile {tile_key}: Appending {n_new} new objects')
+
+    processed_ids, loaded_bands = process_catalog_in_batches(
+        tile=tile,
+        tile_dir=tile_dir,
+        catalog=new_catalog,
+        bands=plan.bands_for_new_objects,
+        band_dictionary=band_dictionary,
+        output_path=output_path,
+        cutout_size=cutout_size,
+    )
+
+    # Record results
+    loaded_bands_set = set(loaded_bands)
+    for obj_id in processed_ids:
+        results.record_object_success(obj_id, loaded_bands_set)
+
+    # Update band stats
+    n_processed = len(processed_ids)
+    for band in loaded_bands:
+        results.record_band_stats(band, succeeded=n_processed)
+
+
+# ========== Main Entry Point ==========
+
+
 def create_cutouts_for_tile(
     tile: tuple[int, int],
     tile_dir: Path,
@@ -353,198 +802,108 @@ def create_cutouts_for_tile(
     output_dir: Path,
     cutout_size: int,
 ) -> CutoutResult:
-    """
-    Create cutouts for objects in a tile.
+    """Create cutouts for objects in a tile.
 
     Handles three scenarios:
-    1. New file: create cutouts for all catalog objects in requested bands
-    2. Existing file, new bands requested: add new band cutouts to existing
-       objects that match the catalog (by coordinate)
-    3. New objects in catalog: create cutouts in ALL available bands
-       (existing + requested) so all objects have uniform band coverage
+        1. New file: create cutouts for all catalog objects in requested bands
+        2. Existing file, new bands requested: add new band cutouts to existing
+           objects that match the catalog (by coordinate)
+        3. New objects in catalog: create cutouts in ALL available bands
+           (existing + requested) so all objects have uniform band coverage
 
     Args:
         tile: Tile coordinates (x, y)
         tile_dir: Directory containing tile data
         bands: Bands to create cutouts for (in this run)
         catalog: DataFrame with object coordinates (ra, dec, x, y, ID)
-        all_band_dictionary: Full band configuration (must contain ALL bands
-            for correct wavelength ordering)
+        all_band_dictionary: Full band configuration
         output_dir: Directory to write HDF5 files
         cutout_size: Square cutout size in pixels
 
     Returns:
         CutoutResult with statistics and object band mapping
     """
+    # Setup
     tile_key = tile_str(tile)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f'{tile_key}_cutouts_{cutout_size}.h5'
-    # track created bands per object
-    object_bands: dict[str, set[str]] = {}
-    # track per-band statistics
-    band_stats: dict[str, dict[str, int]] = {
-        band: {'succeeded': 0, 'skipped': 0, 'failed': 0} for band in bands
-    }
-    BATCH_SIZE = 1000
 
     # Sort requested bands by wavelength
     bands = get_wavelength_order(bands, all_band_dictionary)
 
+    # Initialize result builder
+    results = CutoutResultBuilder(bands)
+
     # Analyze existing file state
     existing_info = analyze_existing_file(output_path)
 
-    # Handle corruption: File exists on disk, but analysis failed (exists=False)
+    # Handle corruption: file exists on disk but analysis failed
     if output_path.exists() and not existing_info.exists:
         logger.warning(
-            f'Tile {tile_key}: Output file exists but appears corrupt or unreadable. '
+            f'Tile {tile_key}: Output file exists but appears corrupt. '
             f'Deleting and recreating: {output_path}'
         )
         try:
             output_path.unlink()
         except OSError as e:
             logger.error(f'Failed to delete corrupt file {output_path}: {e}')
-            return CutoutResult({}, band_stats)  # Fail gracefully
+            return results.build()
 
-    if not existing_info.exists:
-        # Case 1: No existing file - create cutouts for all objects
-        logger.debug(f'Tile {tile_key}: Creating new file with {len(catalog)} objects')
-
-        multiband_data, loaded_bands = read_band_data(
-            tile_dir=tile_dir, tile=tile, bands=bands, in_dict=all_band_dictionary
+        # Reset existing_info after deletion
+        existing_info = ExistingFileInfo(
+            exists=False, bands=[], n_objects=0, object_coords=None, cutout_shape=None
         )
 
-        # Process and write in batches to avoid OOM
-        for start_idx in range(0, len(catalog), BATCH_SIZE):
-            end_idx = min(start_idx + BATCH_SIZE, len(catalog))
-            batch_df = catalog.iloc[start_idx:end_idx].reset_index(drop=True)
-
-            batch_cutouts = make_multiband_cutouts(
-                multiband_data=multiband_data,
-                tile_str=tile_key,
-                df=batch_df,
-                cutout_size=cutout_size,
-            )
-
-            # write_to_h5 handles creation (1st batch) and appending (subsequent batches) automatically
-            write_to_h5(
-                output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
-            )
-
-        # Record cutout bands for all objects
-        n_objects = len(catalog)
-        for obj_id in catalog['ID'].astype(str):
-            object_bands[obj_id] = set(loaded_bands)
-
-        # Update per-band stats for new cutouts
-        for band in loaded_bands:
-            band_stats[band]['succeeded'] = n_objects
-
-        return CutoutResult(object_bands, band_stats)
-
-    # File exists - determine what's new
-    existing_bands_set = set(existing_info.bands)
-    new_bands = [b for b in bands if b not in existing_bands_set]
-
-    # Match catalog objects to existing objects
-    catalog_coords = np.column_stack([catalog['ra'].to_numpy(), catalog['dec'].to_numpy()]).astype(
-        np.float32
+    # Plan operations
+    plan = plan_cutout_operations(
+        catalog=catalog,
+        requested_bands=bands,
+        existing_info=existing_info,
+        all_band_dictionary=all_band_dictionary,
     )
 
-    assert existing_info.object_coords is not None
-    is_match, match_indices = match_objects_by_coords(catalog_coords, existing_info.object_coords)
-
-    n_matched = int(np.sum(is_match))
-
-    # Case 2: Add new bands to existing objects
-    if new_bands and n_matched > 0:
-        logger.debug(f'Tile {tile_key}: Adding bands {new_bands} to {n_matched} existing objects')
-
-        # Load data for new bands only
-        multiband_data, loaded_new_bands = read_band_data(
-            tile_dir=tile_dir, tile=tile, bands=new_bands, in_dict=all_band_dictionary
+    # Execute plan
+    if plan.create_new_file:
+        handle_new_file(
+            plan=plan,
+            tile=tile,
+            tile_dir=tile_dir,
+            output_path=output_path,
+            band_dictionary=all_band_dictionary,
+            cutout_size=cutout_size,
+            results=results,
         )
-
-        if loaded_new_bands:
-            # Create cutouts for matched objects in new bands
-            matched_catalog = catalog[is_match].reset_index(drop=True)
-            new_band_cutouts = make_multiband_cutouts(
-                multiband_data=multiband_data,
-                tile_str=tile_key,
-                df=matched_catalog,
-                cutout_size=cutout_size,
-            )
-
-            # Get the match indices for objects that were matched
-            matched_h5_indices = match_indices[is_match]
-
-            merge_bands_into_h5(
+    else:
+        # Case 2: Add bands to existing objects (if needed)
+        if plan.bands_to_add_to_existing and not plan.matched_catalog.empty:
+            updated_info = handle_add_bands(
+                plan=plan,
+                tile=tile,
+                tile_dir=tile_dir,
                 output_path=output_path,
-                new_cutouts=new_band_cutouts,
-                new_bands=loaded_new_bands,
-                existing_info=existing_info,
-                match_indices=matched_h5_indices,
                 band_dictionary=all_band_dictionary,
-            )
-
-            # Re-read existing_info after merge - bands have changed
-            existing_info = analyze_existing_file(output_path)
-
-            merged_bands = existing_info.bands  # Now contains old + new bands
-            for obj_id in matched_catalog['ID'].astype(str):
-                object_bands[obj_id] = set(merged_bands)
-
-            # Update per-band stats for succeeded cutouts
-            for band in loaded_new_bands:
-                band_stats[band]['succeeded'] = n_matched
-
-    elif n_matched > 0:
-        # Record existing bands for skipped objects
-        for obj_id in catalog[is_match]['ID'].astype(str):
-            object_bands[obj_id] = set(existing_info.bands)
-
-    # Case 3: Append new objects with cutouts in ALL available bands
-    # Objects that were NOT matched in the step above
-    new_object_catalog = catalog[~is_match].reset_index(drop=True)
-    n_new_objects = len(new_object_catalog)
-    if n_new_objects > 0:
-        logger.debug(f'Tile {tile_key}: Appending {n_new_objects} new objects')
-
-        # New objects should have cutouts in all bands (existing + requested)
-        # Since tile data exists for existing bands, we can create full cutouts
-        all_bands = get_wavelength_order(
-            list(set(existing_info.bands) | set(bands)),
-            all_band_dictionary,
-        )
-
-        multiband_data, loaded_bands = read_band_data(
-            tile_dir=tile_dir, tile=tile, bands=all_bands, in_dict=all_band_dictionary
-        )
-
-        # Process and append in batches
-        for start_idx in range(0, len(new_object_catalog), BATCH_SIZE):
-            end_idx = min(start_idx + BATCH_SIZE, len(new_object_catalog))
-            batch_df = new_object_catalog.iloc[start_idx:end_idx].reset_index(drop=True)
-
-            batch_cutouts = make_multiband_cutouts(
-                multiband_data=multiband_data,
-                tile_str=tile_key,
-                df=batch_df,
                 cutout_size=cutout_size,
+                results=results,
+            )
+            # Update plan with new info for potential new objects handling
+            plan.existing_info = updated_info
+
+        # Case 3: Append new objects (if needed)
+        if not plan.new_objects_catalog.empty:
+            handle_new_objects(
+                plan=plan,
+                tile=tile,
+                tile_dir=tile_dir,
+                output_path=output_path,
+                band_dictionary=all_band_dictionary,
+                cutout_size=cutout_size,
+                results=results,
             )
 
-            write_to_h5(
-                output_path, batch_cutouts, batch_df, loaded_bands, tile_key, all_band_dictionary
-            )
+    return results.build()
 
-        # Record cutout bands for new objects
-        for obj_id in new_object_catalog['ID'].astype(str):
-            object_bands[obj_id] = set(loaded_bands)
 
-        # Update per-band stats for new cutouts
-        for band in loaded_bands:
-            band_stats[band]['succeeded'] += n_new_objects
-
-    return CutoutResult(object_bands, band_stats)
+# ========== Batch Processing for Multiple Tiles ==========
 
 
 def create_cutouts_for_existing_tiles(
