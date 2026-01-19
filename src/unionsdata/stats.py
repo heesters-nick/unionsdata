@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from threading import Lock
 
 import pandas as pd
 from rich.console import Console
@@ -53,27 +54,32 @@ class RunStatistics:
     tile_processing: dict[str, BandProcessingStats] = field(default_factory=dict)
     cutout_processing: dict[str, BandProcessingStats] = field(default_factory=dict)
 
+    # Internal lock - exclude from repr/comparison
+    _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+
     def initialize_bands(self, bands: list[str]) -> None:
         """Initialize tracking structures for the given bands."""
-        self.bands = bands
-        for band in bands:
-            self.tile_availability[band] = BandAvailability()
-            self.cutout_availability[band] = BandAvailability()
-            self.tile_processing[band] = BandProcessingStats()
-            self.cutout_processing[band] = BandProcessingStats()
+        with self._lock:
+            self.bands = bands
+            for band in bands:
+                self.tile_availability[band] = BandAvailability()
+                self.cutout_availability[band] = BandAvailability()
+                self.tile_processing[band] = BandProcessingStats()
+                self.cutout_processing[band] = BandProcessingStats()
 
     def record_tile_download(self, band: str, status: str) -> None:
         """Record a tile download outcome."""
-        if band not in self.tile_processing:
-            self.tile_processing[band] = BandProcessingStats()
+        with self._lock:
+            if band not in self.tile_processing:
+                self.tile_processing[band] = BandProcessingStats()
 
-        stats = self.tile_processing[band]
-        if status == 'downloaded':
-            stats.succeeded += 1
-        elif status == 'skipped':
-            stats.skipped += 1
-        elif status == 'failed':
-            stats.failed += 1
+            stats = self.tile_processing[band]
+            if status == 'downloaded':
+                stats.succeeded += 1
+            elif status == 'skipped':
+                stats.skipped += 1
+            elif status == 'failed':
+                stats.failed += 1
 
     def record_cutout_result(
         self,
@@ -83,13 +89,14 @@ class RunStatistics:
         failed: int = 0,
     ) -> None:
         """Record cutout processing outcomes for a band."""
-        if band not in self.cutout_processing:
-            self.cutout_processing[band] = BandProcessingStats()
+        with self._lock:
+            if band not in self.cutout_processing:
+                self.cutout_processing[band] = BandProcessingStats()
 
-        stats = self.cutout_processing[band]
-        stats.succeeded += succeeded
-        stats.skipped += skipped
-        stats.failed += failed
+            stats = self.cutout_processing[band]
+            stats.succeeded += succeeded
+            stats.skipped += skipped
+            stats.failed += failed
 
 
 def compute_tile_availability(

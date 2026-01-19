@@ -528,7 +528,6 @@ def download_worker(
     progress_tracker: ProgressTracker,
     expected_sizes: dict[Path, int],
     run_stats: RunStatistics,
-    stats_lock: threading.Lock,
 ) -> None:
     """
     Worker thread that downloads tiles from the queue.
@@ -553,8 +552,7 @@ def download_worker(
         tiles_claimed_for_cutout: Set to track tiles already submitted for cutouts
         progress_tracker: Shared ProgressTracker instance
         expected_sizes: Dictionary mapping final_path to expected file size
-        download_stats: Dictionary to track download statistics
-        stats_lock: Lock to synchronize access to download_stats
+        run_stats: RunStatistics object to track download statistics
 
     Returns:
         None
@@ -608,8 +606,7 @@ def download_worker(
                 )
 
                 # Update per-band stats safely
-                with stats_lock:
-                    run_stats.record_tile_download(band, status)
+                run_stats.record_tile_download(band, status)
 
                 if status in ['downloaded', 'skipped']:
                     downloads_completed += 1
@@ -758,7 +755,6 @@ def download_tiles(
 
     # Create queue and threading objects
     download_queue: Queue[tuple[tuple[int, int], str] | object] = Queue()
-    stats_lock = threading.Lock()
     shutdown_flag = Event()
 
     tile_success_map_lock = threading.Lock()
@@ -871,7 +867,6 @@ def download_tiles(
                 progress_tracker,
                 expected_sizes,
                 run_stats,
-                stats_lock,
             ),
             name=f'DownloadWorker-{i}',
         )
@@ -972,9 +967,8 @@ def download_tiles(
                 # Process collected results
                 for tile_key, result in collected_results.items():
                     if isinstance(result, Exception):
-                        with stats_lock:
-                            for band in requested_bands:
-                                run_stats.record_cutout_result(band, failed=1)
+                        for band in requested_bands:
+                            run_stats.record_cutout_result(band, failed=1)
                         logger.error(f'❌ Cutouts failed for tile {tile_key}: {result}')
                         continue
 
@@ -985,14 +979,13 @@ def download_tiles(
                         tile_cutout_info[tile_key] = tile_bands
 
                         # Update per-band cutout stats from the result
-                        with stats_lock:
-                            for band, band_stats in result.band_stats.items():
-                                run_stats.record_cutout_result(
-                                    band,
-                                    succeeded=band_stats.get('succeeded', 0),
-                                    skipped=band_stats.get('skipped', 0),
-                                    failed=band_stats.get('failed', 0),
-                                )
+                        for band, band_stats in result.band_stats.items():
+                            run_stats.record_cutout_result(
+                                band,
+                                succeeded=band_stats.get('succeeded', 0),
+                                skipped=band_stats.get('skipped', 0),
+                                failed=band_stats.get('failed', 0),
+                            )
 
                         # Aggregate per-object band info
                         cutout_success_map.update(result.object_bands)
