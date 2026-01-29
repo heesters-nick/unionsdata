@@ -37,7 +37,6 @@ from unionsdata.verification import get_file_size, is_fits_valid, verify_downloa
 
 logger = logging.getLogger(__name__)
 QUEUE_TIMEOUT = 1  # seconds
-_SHUTDOWN_SENTINEL = object()
 
 
 # ========== Progress Tracking ==========
@@ -568,8 +567,8 @@ def download_worker(
             # Get next download job
             job = download_queue.get(timeout=QUEUE_TIMEOUT)
 
-            # Check for sentinel
-            if job is _SHUTDOWN_SENTINEL:
+            # Check for shutdown sentinel
+            if job is None:
                 logger.debug(f'Download worker {worker_id} received shutdown signal')
                 download_queue.task_done()
                 break
@@ -679,6 +678,24 @@ def download_worker(
                                         logger.error(
                                             f'Failed to submit cutout job for {tile_str_key}: {e}'
                                         )
+                                        try:
+                                            result = create_cutouts_for_tile(
+                                                tile=tile,
+                                                tile_dir=paths['tile_dir'],
+                                                bands=bands_sorted_by_wavelength,
+                                                catalog=tile_catalog,
+                                                all_band_dictionary=all_band_dictionary,
+                                                output_dir=cutout_save_dir,
+                                                cutout_size=cutouts.size_pix,
+                                            )
+                                            completed_future: Future[CutoutResult] = Future()
+                                            completed_future.set_result(result)
+                                            tiles_claimed_for_cutout.add(tile_str_key)
+                                            cutout_futures[tile_str_key] = completed_future
+                                        except Exception as e2:
+                                            logger.error(
+                                                f'Cutout creation failed for {tile_str_key}: {e2}'
+                                            )
 
                     else:
                         logger.debug(
@@ -754,7 +771,7 @@ def download_tiles(
     """
 
     # Create queue and threading objects
-    download_queue: Queue[tuple[tuple[int, int], str] | object] = Queue()
+    download_queue: Queue[tuple[tuple[int, int], str] | None] = Queue()
     shutdown_flag = Event()
 
     tile_success_map_lock = threading.Lock()
@@ -925,7 +942,7 @@ def download_tiles(
 
         # Send sentinel values to wake up workers
         for _ in range(num_threads):
-            download_queue.put(_SHUTDOWN_SENTINEL)
+            download_queue.put(None)
 
         # Wait for all threads to finish
         logger.debug('Waiting for worker threads to finish...')

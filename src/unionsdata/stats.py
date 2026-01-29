@@ -233,7 +233,10 @@ def compute_cutout_skipped(
     """
     Compute skipped cutout counts from catalog's existing cutout_bands.
 
-    Call this BEFORE processing starts to record what's already done locally.
+    Args:
+        catalog: Augmented catalog with 'cutout_bands' column
+        bands: List of requested bands
+        stats: RunStatistics object to update
     """
     if catalog.empty or 'cutout_bands' not in catalog.columns:
         return
@@ -256,6 +259,11 @@ def compute_tile_skipped(
 ) -> None:
     """
     Compute skipped tile counts from catalog's existing bands_downloaded.
+
+    Args:
+        catalog: Augmented catalog with 'bands_downloaded' column
+        bands: List of requested bands
+        stats: RunStatistics object to update
     """
     if catalog.empty or 'bands_downloaded' not in catalog.columns:
         return

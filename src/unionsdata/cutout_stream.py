@@ -248,25 +248,25 @@ def parse_cutout_bytes(
         # Silence Astropy warnings about truncation/checksums to avoid double logging
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', AstropyWarning)
-        with fits.open(io.BytesIO(data), memmap=False) as hdul:
-            if fits_ext >= len(hdul):
-                fits_ext = 0
-            hdu = cast(ImageHDU | PrimaryHDU, hdul[fits_ext])
+            with fits.open(io.BytesIO(data), memmap=False) as hdul:
+                if fits_ext >= len(hdul):
+                    fits_ext = 0
+                hdu = cast(ImageHDU | PrimaryHDU, hdul[fits_ext])
 
-            if hdu.data is None:
-                raise ValueError(f'No data in extension {fits_ext}')
+                if hdu.data is None:
+                    raise ValueError(f'No data in extension {fits_ext}')
 
-            img = hdu.data.astype(np.float32)
-            h, w = img.shape
+                img = hdu.data.astype(np.float32)
+                h, w = img.shape
 
-            # Calculate valid placement region
-            y_end = min(pad_y + h, cutout_size)
-            x_end = min(pad_x + w, cutout_size)
-            h_copy = y_end - pad_y
-            w_copy = x_end - pad_x
+                # Calculate valid placement region
+                y_end = min(pad_y + h, cutout_size)
+                x_end = min(pad_x + w, cutout_size)
+                h_copy = y_end - pad_y
+                w_copy = x_end - pad_x
 
-            if h_copy > 0 and w_copy > 0:
-                output[pad_y:y_end, pad_x:x_end] = img[:h_copy, :w_copy]
+                if h_copy > 0 and w_copy > 0:
+                    output[pad_y:y_end, pad_x:x_end] = img[:h_copy, :w_copy]
 
     except (OSError, TypeError, ValueError) as e:
         # OSError: Corrupt FITS header or truncated file
