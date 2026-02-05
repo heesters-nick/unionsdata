@@ -9,7 +9,6 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import pexpect
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -283,58 +282,46 @@ class RenewCertificateDialog(ModalScreen[dict[str, Any] | None]):
 
     @work(thread=True)
     def _run_cert_command(self, username: str, password: str) -> None:
-        """Run the command using pexpect to handle the interactive password prompt."""
-
+        """Create/renew CADC certificate using cadcutils API."""
         try:
-            cmd = 'cadc-get-cert'
-            args = ['-u', username]
+            from cadcutils.net.auth import Subject, get_cert
 
-            child = pexpect.spawn(cmd, args, encoding='utf-8', timeout=15)
+            # Construct default certificate path
+            cert_path = Path.home() / '.ssl' / 'cadcproxy.pem'
 
-            index = child.expect(['[Pp]assword:', pexpect.EOF, pexpect.TIMEOUT])
+            # Ensure parent directory exists
+            cert_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if index == 0:
-                child.sendline(password)
-                child.expect(pexpect.EOF)
-                child.close()
+            # Create subject with username
+            subject = Subject(username=username)
 
-                raw_output = child.before or ''
-                output = raw_output.strip()
+            # Pre-populate the auth cache so get_auth() doesn't prompt via getpass
+            # This is to bypass the terminal prompt since we're in a TUI
+            def get_auth_no_prompt(realm: str) -> tuple[str, str]:
+                return (username, password)
 
-                # Check for explicit failure messages first
-                if 'invalid username/password combination' in output or 'FAILED' in output:
-                    self.app.call_from_thread(self._handle_error, 'Invalid username or password')
-                    return
+            subject.get_auth = get_auth_no_prompt
 
-                if child.exitstatus == 0:
-                    # Strict success check: We MUST find the "saved in" message.
-                    match = re.search(r'saved in\s+(.+)$', output, re.MULTILINE)
+            # Get the certificate content
+            cert_content = get_cert(subject, days_valid=10)
 
-                    if match:
-                        path = match.group(1).strip()
-                        if path.endswith('.'):
-                            path = path[:-1]
-                        self.app.call_from_thread(self._handle_success, path)
-                    else:
-                        # No "saved in" message = FAILURE.
-                        self.app.call_from_thread(
-                            self._handle_error,
-                            f'Certificate renewal failed. Unexpected output: {output}',
-                        )
-                else:
-                    self.app.call_from_thread(self._handle_error, output)
+            # Write to file
+            with open(cert_path, 'w') as f:
+                f.write(cert_content)
 
-            elif index == 1:
-                child.close()
-                err_output = (child.before or '').strip() or 'Process exited unexpectedly'
-                self.app.call_from_thread(self._handle_error, err_output)
+            self.app.call_from_thread(self._handle_success, str(cert_path))
 
-            elif index == 2:
-                child.close()
-                self.app.call_from_thread(self._handle_error, 'Connection timed out')
-
+        except ImportError:
+            self.app.call_from_thread(
+                self._handle_error,
+                'cadcutils not installed. Install with: pip install vos',
+            )
         except Exception as e:
-            self.app.call_from_thread(self._handle_error, str(e))
+            error_msg = str(e).lower()
+            if 'unauthorized' in error_msg or '401' in error_msg or 'invalid' in error_msg:
+                self.app.call_from_thread(self._handle_error, 'Invalid username or password')
+            else:
+                self.app.call_from_thread(self._handle_error, f'Error: {e}')
 
     def _handle_success(self, path: str) -> None:
         """Return success data to the main app."""

@@ -18,6 +18,8 @@ def mock_cert_file(tmp_path: Path) -> Path:
 @pytest.fixture
 def test_config(tmp_path: Path, mock_cert_file: Path) -> Path:
     """Create a minimal test config file."""
+    # Convert to forward slashes for cross-platform YAML compatibility
+    cert_path_str = str(mock_cert_file).replace('\\', '/')
     config_content = f"""
 machine: local
 
@@ -87,21 +89,21 @@ paths_by_machine:
     root_dir_data: "/test/data"
     dir_tables: "/test/tables"
     dir_figures: "/test/figures"
-    cert_path: "{mock_cert_file}"
+    cert_path: "{cert_path_str}"
 
   canfar:
     root_dir_main: "/arc/test/main"
     root_dir_data: "/arc/test/data"
     dir_tables: "/arc/test/tables"
     dir_figures: "/arc/test/figures"
-    cert_path: "{mock_cert_file}"
+    cert_path: "{cert_path_str}"
 
   narval:
     root_dir_main: "/home/user/projects/profile/main"
     root_dir_data: "/home/user/projects/profile/data"
     dir_tables: "/home/user/projects/profile/tables"
     dir_figures: "/home/user/projects/profile/figures"
-    cert_path: "{mock_cert_file}"
+    cert_path: "{cert_path_str}"
 
 bands:
   cfis-u:
@@ -226,8 +228,10 @@ def test_load_settings_missing_cert_file(test_config: Path, mock_cert_file: Path
     """Test that missing certificate file raises appropriate error."""
 
     invalid_config = test_config.read_text()
+    # Use forward slashes to match fixture format
+    cert_path_str = str(mock_cert_file).replace('\\', '/')
     invalid_config = invalid_config.replace(
-        f'cert_path: "{mock_cert_file}"', 'cert_path: "/non/existent/cert.pem"'
+        f'cert_path: "{cert_path_str}"', 'cert_path: "/non/existent/cert.pem"'
     )
     test_config.write_text(invalid_config)
 

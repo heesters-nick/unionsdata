@@ -98,6 +98,9 @@ END"""
 @pytest.fixture
 def test_config(tmp_path: Path, mock_cert_file: Path) -> Path:
     """Create a minimal test config file."""
+    # Convert to forward slashes for cross-platform YAML compatibility
+    cert_path_str = str(mock_cert_file).replace('\\', '/')
+    temp_path_str = str(tmp_path).replace('\\', '/')
     config_content = f"""
 machine: local
 
@@ -160,11 +163,11 @@ paths_database:
 
 paths_by_machine:
   local:
-    root_dir_main: "{tmp_path}"
-    root_dir_data: "{tmp_path / 'data'}"
-    dir_tables: "{tmp_path / 'tables'}"
-    dir_figures: "{tmp_path / 'figures'}"
-    cert_path: "{mock_cert_file}"
+    root_dir_main: "{temp_path_str}"
+    root_dir_data: "{temp_path_str}/data"
+    dir_tables: "{temp_path_str}/tables"
+    dir_figures: "{temp_path_str}/figures"
+    cert_path: "{cert_path_str}"
 
 bands:
   cfis-u:
