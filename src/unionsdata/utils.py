@@ -1,7 +1,6 @@
 import logging
 import os
 import re
-import subprocess
 import time
 from itertools import combinations
 from pathlib import Path
@@ -567,21 +566,45 @@ def tile_str(tile: tuple[int, int]) -> str:
     return f'{tile[0]:03d}_{tile[1]:03d}'
 
 
-def decompress_fits(in_path: Path) -> None:
+# def decompress_fits(in_path: Path) -> None:
+#     """
+#     Decompress a tile-compressed FITS using funpack.
+#     """
+
+#     try:
+#         subprocess.run(
+#             ['funpack', '-F', str(in_path)],
+#             check=True,
+#             capture_output=True,
+#             text=True,
+#         )
+#         logger.debug(f'Decompressed {in_path.name}')
+#     except subprocess.CalledProcessError as e:
+#         raise RuntimeError(f'funpack failed for {in_path}: {e.stderr.strip()}') from e
+
+
+def decompress_fits(file_path: Path, fits_ext: int = 1) -> None:
     """
-    Decompress a tile-compressed FITS using funpack.
+    Decompress fits file by reading and saving again.
     """
+    temp_path = file_path.with_name(file_path.name + '.tmp')
 
     try:
-        subprocess.run(
-            ['funpack', '-F', str(in_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        logger.debug(f'Decompressed {in_path.name}')
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f'funpack failed for {in_path}: {e.stderr.strip()}') from e
+        # Read the data and header from the compressed file
+        data, header = open_fits(file_path, fits_ext=fits_ext)
+        # Create a new PrimaryHDU with the data and header
+        new_hdu = fits.PrimaryHDU(data=data, header=header)
+        # Overwrite the existing file
+        new_hdu.writeto(temp_path, overwrite=True, checksum=True)
+        # Atomically replace the original file with the decompressed version
+        temp_path.replace(file_path)
+    except Exception as e:
+        # Clean up partial temp file if it exists
+        if temp_path.exists():
+            temp_path.unlink()
+
+        # Raise as RuntimeError so we catch it correctly
+        raise RuntimeError(f'Astropy decompression failed: {e}') from e
 
 
 def open_fits(file_path: Path, fits_ext: int) -> tuple[NDArray[np.float32], Header]:

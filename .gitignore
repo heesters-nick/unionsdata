@@ -13,3 +13,4 @@ figures/
 .ruff_cache/
 tile_info*/
 notebooks/
+.DS_Store

@@ -71,7 +71,7 @@ inputs:
     - [231.4445, 52.4447]
 
   table:
-    path: "/home/nick/astro/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
+    path: "/Users/nick/Projects/unionsdata/tables/M101_lsb.csv"        # CSV with RA/Dec/ID columns
     columns:
       ra: "ra"                                                     # Right Ascension column name
       dec: "dec"                                                   # Declination column name
@@ -85,11 +85,11 @@ paths_database:
 
 paths_by_machine:
   local:
-    root_dir_main: "/home/nick/astro/unionsdata"
-    root_dir_data: "/home/nick/astro/unionsdata/data"
-    dir_tables: "/home/nick/astro/unionsdata/tables"
-    dir_figures: "/home/nick/astro/unionsdata/figures"
-    cert_path: "/home/nick/.ssl/cadcproxy.pem"
+    root_dir_main: "/Users/nick/Projects/unionsdata"
+    root_dir_data: "/Users/nick/Projects/unionsdata/data"
+    dir_tables: "/Users/nick/Projects/unionsdata/tables"
+    dir_figures: "/Users/nick/Projects/unionsdata/figures"
+    cert_path: "/Users/nick/.ssl/cadcproxy.pem"
 
   canfar:
     root_dir_main: "/arc/home/heestersnick/unionsdata"
