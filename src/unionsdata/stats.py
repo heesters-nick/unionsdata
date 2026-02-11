@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 import pandas as pd
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -299,8 +300,11 @@ def report_summary(
     """
     console = Console()
 
+    # Define a consistent width for all elements
+    TABLE_WIDTH = 55
+
     console.print()
-    console.print('=' * 60, style='bold')
+    console.print('=' * TABLE_WIDTH, style='bold')
 
     # Determine if we should show tile stats
     show_tile_stats = show_tiles and cutout_mode != 'direct_only'
@@ -321,9 +325,11 @@ def report_summary(
             header_style='bold cyan',
             title='📊 TILE AVAILABILITY BY BAND',
             title_style='bold',
+            width=TABLE_WIDTH,
+            box=box.ROUNDED,
         )
 
-        table.add_column('Band', style='white')
+        table.add_column('Band', justify='left', style='white')
         table.add_column('Requested', justify='right')
         table.add_column('Available', justify='right', style='green')
         table.add_column('Unavailable', justify='right', style='orange3')
@@ -364,9 +370,11 @@ def report_summary(
             header_style='bold cyan',
             title='📊 CUTOUT AVAILABILITY BY BAND',
             title_style='bold',
+            width=TABLE_WIDTH,
+            box=box.ROUNDED,
         )
 
-        table.add_column('Band', style='white')
+        table.add_column('Band', justify='left', style='white')
         table.add_column('Requested', justify='right')
         table.add_column('Available', justify='right', style='green')
         table.add_column('Unavailable', justify='right', style='orange3')
@@ -418,9 +426,11 @@ def report_summary(
             header_style='bold cyan',
             title='⬇️  TILE DOWNLOADS BY BAND',
             title_style='bold',
+            width=TABLE_WIDTH,
+            box=box.ROUNDED,
         )
 
-        table.add_column('Band', style='white')
+        table.add_column('Band', justify='left', style='white')
         table.add_column('✅ Succeeded', justify='right', style='green')
         table.add_column('⏭️  Skipped', justify='right', style='orange3')
         table.add_column('❌ Failed', justify='right', style='red')
@@ -461,9 +471,11 @@ def report_summary(
             header_style='bold cyan',
             title='✂️  CUTOUTS BY BAND',
             title_style='bold',
+            width=TABLE_WIDTH,
+            box=box.ROUNDED,
         )
 
-        table.add_column('Band', style='white')
+        table.add_column('Band', justify='left', style='white')
         table.add_column('✅ Succeeded', justify='right', style='green')
         table.add_column('⏭️  Skipped', justify='right', style='orange3')
         table.add_column('❌ Failed', justify='right', style='red')
@@ -509,5 +521,5 @@ def report_summary(
             console.print(table)
 
     console.print()
-    console.print('=' * 60, style='bold')
+    console.print('=' * TABLE_WIDTH, style='bold')
     console.print()
