@@ -28,7 +28,7 @@ dependencies = [
     "matplotlib>=3.8.0",
     "cryptography>=46.0.3",
     "tqdm>=4.67.1",
-    "rich>=14.2.0",
+    "rich==14.2.0",
     "textual>=6.6.0",
 ]
 

@@ -301,7 +301,7 @@ def report_summary(
     console = Console()
 
     # Define a consistent width for all elements
-    TABLE_WIDTH = 55
+    TABLE_WIDTH = 60
 
     console.print()
     console.print('=' * TABLE_WIDTH, style='bold')
