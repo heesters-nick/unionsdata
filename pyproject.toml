@@ -29,7 +29,7 @@ dependencies = [
     "cryptography>=46.0.3",
     "tqdm>=4.67.1",
     "rich==14.2.0",
-    "textual>=6.6.0",
+    "textual==6.6.0",
 ]
 
 # ---- Optional dependency groups for dev tooling, tests, docs, etc. ----

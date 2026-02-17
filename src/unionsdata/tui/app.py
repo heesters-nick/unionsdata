@@ -486,7 +486,7 @@ class ConfigEditorApp(App[None]):
             'runtime': {
                 'n_download_threads': 12,
                 'n_cutout_processes': 2,
-                'bands': None,
+                'bands': [],
                 'resume': False,
                 'max_retries': 5,
             },
@@ -504,7 +504,7 @@ class ConfigEditorApp(App[None]):
             'plotting': {
                 'enable': False,
                 'catalog_name': 'catalog',
-                'bands': None,
+                'bands': [],
                 'size_pix': 512,
                 'mode': 'grid',
                 'max_cols': 5,
