@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-18
+
 ### Added
 - `require_all_specified_bands` flag in config.yaml to specify if all specified bands need to be available for a tile to download it.
 - download verification by checking if downloaded files have the expected size
@@ -76,6 +78,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-[Unreleased]: https://github.com/heesters-nick/unionsdata/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/heesters-nick/unionsdata/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/heesters-nick/unionsdata/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/heesters-nick/unionsdata/releases/tag/v0.1.1
 [0.1.0]: https://github.com/heesters-nick/unionsdata/releases/tag/v0.1.0

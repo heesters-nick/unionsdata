@@ -12,10 +12,12 @@ A Python package for downloading multi-band imaging data from the Ultraviolet Ne
 
 ✨ **Multi-threaded downloads** - Parallel downloading for improved performance\
 🎯 **Flexible input methods** - Use coordinates, tile numbers, or CSV catalogs\
+🖥️ **Interactive Configuration** - Terminal User Interface (TUI) for easy setup and validation\
+⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
 🌳 **Spatial indexing** - KD-tree for efficient coordinate-to-tile matching\
 📊 **Progress tracking** - Real-time download status and completion reports\
-⚙️ **Configuration validation** - Pydantic-based config with clear error messages\
-✂️ **Cutout creation** - Create and plot grayscale or RGB cutouts around objects of interest\
+✅ **Data Integrity** - Automatic verification of file sizes and headers to ensure downloaded files are not corrupted\
+✂️ **Cutout creation** - Stream cutouts directly from the server without downloading full tiles, or extract them from downloaded data\
 🛡️ **Graceful shutdown** - Clean interrupt handling with temp file cleanup
 
 ## Quick Start
@@ -29,7 +31,7 @@ unionsdata init    # Create your local copy of the config
 unionsdata config  # Configure your download
 
 # Download tiles
-unionsdata download --tiles 217 292 --bands whigs-g cfis_lsb-r ps-i
+unionsdata
 ```
 
 ## Prerequisites

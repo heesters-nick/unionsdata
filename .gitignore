@@ -17,3 +17,5 @@ notebooks/
 test-install.sh
 unionsdata-test/
 dist/
+install-test-pypi.sh
+install-pypi.sh
